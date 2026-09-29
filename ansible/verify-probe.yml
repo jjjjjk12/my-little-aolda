@@ -1,0 +1,40 @@
+---
+- name: Verify a real ARM64 guest boot using KVM
+  hosts: probe
+  become: true
+  gather_facts: false
+  vars_files:
+    - probe-vars.yml
+  tasks:
+    - name: Boot, log in, verify KVM, and shut down the temporary guest
+      block:
+        - name: Run nested guest verification
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - "{{ probe_dir }}/verify-nested.py"
+              - --directory
+              - "{{ probe_dir }}"
+              - --firmware
+              - "{{ probe_firmware }}"
+              - --memory
+              - "{{ probe_memory_mib | string }}"
+              - --cpus
+              - "{{ probe_vcpus | string }}"
+          register: probe_result
+          changed_when: false
+          async: 720
+          poll: 5
+
+        - name: Display verification result
+          ansible.builtin.debug:
+            var: probe_result.stdout
+      always:
+        - name: Fetch boot log and machine-readable result
+          ansible.builtin.fetch:
+            src: "{{ probe_dir }}/{{ item }}"
+            dest: "{{ playbook_dir }}/artifacts/{{ inventory_hostname }}/{{ item }}"
+            flat: true
+          loop:
+            - serial.log
+            - result.json

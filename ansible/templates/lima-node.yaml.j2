@@ -1,0 +1,25 @@
+vmType: vz
+arch: aarch64
+nestedVirtualization: true
+
+cpus: {{ lima_cpus }}
+memory: "{{ lima_memory_gib }}GiB"
+disk: "{{ lima_os_disk_gib }}GiB"
+
+images:
+  - location: "{{ lima_image_url }}"
+    arch: aarch64
+    digest: "{{ lima_image_digest }}"
+
+mounts: []
+
+containerd:
+  system: false
+  user: false
+
+networks:
+  - lima: "{{ lima_network }}"
+
+additionalDisks:
+  - name: "{{ item.name }}-ceph"
+    format: false

@@ -1,0 +1,14 @@
+---
+lima_cpus: 4
+lima_memory_gib: 12
+lima_os_disk_gib: 40
+lima_ceph_disk_gib: 40
+
+lima_network: user-v2
+lima_image_url: https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img
+lima_image_digest: sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc
+
+lima_nodes:
+  - name: mla-01
+  - name: mla-02
+  - name: mla-03

@@ -1,0 +1,7 @@
+# This probe targets Ubuntu 24.04 ARM64; other hosts fail preflight explicitly.
+probe_dir: /var/lib/aolda-nested-probe
+probe_image_url: https://download.cirros-cloud.net/0.6.3/cirros-0.6.3-aarch64-disk.img
+probe_image_sha256: 611879b8299363fe60ff0f84982e4da08e63f476e8481170223db982959783cb
+probe_firmware: /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+probe_memory_mib: 512
+probe_vcpus: 1

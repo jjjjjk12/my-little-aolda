@@ -1,0 +1,63 @@
+---
+- name: Prepare ARM64 nested virtualization probe
+  hosts: probe
+  become: true
+  vars_files:
+    - probe-vars.yml
+  tasks:
+    - name: Check supported operating system and architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] == 'aarch64'
+        fail_msg: This probe requires Ubuntu 24.04 ARM64 with nested KVM enabled.
+
+    - name: Inspect KVM device
+      ansible.builtin.stat:
+        path: /dev/kvm
+      register: probe_kvm
+
+    - name: Require a KVM character device
+      ansible.builtin.assert:
+        that:
+          - probe_kvm.stat.exists
+          - probe_kvm.stat.ischr | default(false)
+
+    - name: Install virtualization and verification tools
+      ansible.builtin.apt:
+        name:
+          - qemu-system-arm
+          - qemu-utils
+          - qemu-efi-aarch64
+          - python3-pexpect
+          - ca-certificates
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create probe directory
+      ansible.builtin.file:
+        path: "{{ probe_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Download checksum-pinned CirrOS image
+      ansible.builtin.get_url:
+        url: "{{ probe_image_url }}"
+        dest: "{{ probe_dir }}/cirros-aarch64.img"
+        checksum: "sha256:{{ probe_image_sha256 }}"
+        owner: root
+        group: root
+        mode: '0644'
+        timeout: 60
+
+    - name: Install repeatable boot verification script
+      ansible.builtin.copy:
+        src: files/verify-nested.py
+        dest: "{{ probe_dir }}/verify-nested.py"
+        owner: root
+        group: root
+        mode: '0755'
