@@ -1,0 +1,19 @@
+---
+mla_management_network:
+  name: mla-management
+  mode: shared
+  gateway: 192.168.110.1
+  netmask: 255.255.255.0
+  dhcp_end: 192.168.110.100
+
+mla_management_addresses:
+  mla-01: 192.168.110.111
+  mla-02: 192.168.110.112
+  mla-03: 192.168.110.113
+
+mla_provider_network:
+  name: mla-provider
+  mode: shared
+  gateway: 192.168.120.1
+  netmask: 255.255.255.0
+  dhcp_end: 192.168.120.100

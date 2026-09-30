@@ -18,7 +18,8 @@ containerd:
   user: false
 
 networks:
-  - lima: "{{ lima_network }}"
+  - lima: "{{ mla_management_network.name }}"
+  - lima: "{{ mla_provider_network.name }}"
 
 additionalDisks:
   - name: "{{ item.name }}-ceph"

@@ -18,7 +18,8 @@ containerd:
   user: false
 
 networks:
-  - lima: "user-v2"
+  - lima: "mla-management"
+  - lima: "mla-provider"
 
 additionalDisks:
   - name: "mla-02-ceph"

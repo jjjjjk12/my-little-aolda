@@ -1,0 +1,85 @@
+---
+- name: Prepare the Lima network
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  vars_files:
+    - ../var/network-vars.yml
+
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    lima_home: >-
+      {{ lookup('env', 'LIMA_HOME')
+         | default(lookup('env', 'HOME') ~ '/.lima', true) }}
+    networks_file: "{{ lima_home }}/_config/networks.yaml"
+
+  tasks:
+    - name: Check socket_vmnet installation
+      ansible.builtin.command:
+        argv:
+          - /opt/socket_vmnet/bin/socket_vmnet
+          - --version
+      changed_when: false
+
+    - name: Read existing Lima network definitions
+      ansible.builtin.slurp:
+        src: "{{ networks_file }}"
+      register: networks_source
+
+    - name: Parse existing network definitions
+      ansible.builtin.set_fact:
+        existing_network_config: >-
+          {{ networks_source.content | b64decode | from_yaml }}
+
+    - name: Build lab network definitions
+      ansible.builtin.set_fact:
+        lab_network_entries: >-
+          {{
+            {
+              mla_management_network.name: {
+                'mode': mla_management_network.mode,
+                'gateway': mla_management_network.gateway,
+                'netmask': mla_management_network.netmask,
+                'dhcpEnd': mla_management_network.dhcp_end
+              },
+              mla_provider_network.name: {
+                'mode': mla_provider_network.mode,
+                'gateway': mla_provider_network.gateway,
+                'netmask': mla_provider_network.netmask,
+                'dhcpEnd': mla_provider_network.dhcp_end
+              }
+            }
+          }}
+
+    - name: Add lab networks while preserving other networks
+      ansible.builtin.copy:
+        dest: "{{ networks_file }}"
+        content: >-
+          {{
+            existing_network_config
+            | combine({'networks': lab_network_entries}, recursive=True)
+            | to_nice_yaml
+          }}
+        mode: "0600"
+        backup: true
+
+    - name: Generate sudo rules for the updated network configuration
+      ansible.builtin.command:
+        argv:
+          - limactl
+          - sudoers
+      register: lima_sudoers
+      changed_when: false
+
+    - name: Install validated Lima sudo rules
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/lima
+        content: "{{ lima_sudoers.stdout }}\n"
+        owner: root
+        group: wheel
+        mode: "0444"
+        backup: true
+        validate: /usr/sbin/visudo -cf %s
