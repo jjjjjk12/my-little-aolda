@@ -1,0 +1,92 @@
+---
+- name: Configure VM management and provider interfaces
+  hosts: mla
+  become: true
+  gather_facts: false
+  serial: 1
+
+  vars_files:
+    - ../var/network-vars.yml
+
+  tasks:
+    - name: Check that the node has a management address
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in mla_management_addresses
+        fail_msg: "Management address is missing for this node."
+
+    - name: Check expected interfaces exist
+      ansible.builtin.command:
+        argv:
+          - ip
+          - link
+          - show
+          - dev
+          - "{{ item }}"
+      loop:
+        - lima0
+        - lima1
+      changed_when: false
+
+    - name: Install lab network configuration
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/mla-network.yaml.j2"
+        dest: /etc/netplan/90-mla-network.yaml
+        owner: root
+        group: root
+        mode: "0666"
+        backup: true
+
+    - name: Validate merged Netplan configuration
+      ansible.builtin.command:
+        argv:
+          - netplan
+          - generate
+      changed_when: false
+
+    - name: Apply Netplan asynchronously
+      ansible.builtin.command:
+        argv:
+          - netplan
+          - apply
+      async: 60
+      poll: 0
+      register: netplan_apply
+      changed_when: true
+
+    - name: Wait for SSH connectivity
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Check Netplan application result
+      ansible.builtin.async_status:
+        jid: "{{ netplan_apply.ansible_job_id }}"
+      register: netplan_apply_result
+      until: netplan_apply_result.finished
+      retries: 20
+      delay: 3
+
+    - name: Read interface addresses
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -br
+          - address
+      register: interface_addresses
+      changed_when: false
+
+    - name: Read IPv4 routes
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -4
+          - route
+      register: ipv4_routes
+      changed_when: false
+
+    - name: Show resulting network configuration
+      ansible.builtin.debug:
+        msg:
+          addresses: "{{ interface_addresses.stdout_lines }}"
+          routes: "{{ ipv4_routes.stdout_lines }}"

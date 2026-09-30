@@ -1,0 +1,21 @@
+network:
+  version: 2
+  ethernets:
+    lima0:
+      dhcp4: false
+      dhcp6: false
+      accept-ra: false
+      link-local: []
+      addresses:
+        - "{{ mla_management_addresses[inventory_hostname] }}/24"
+      routes:
+        - to: default
+          via: "{{ mla_management_network.gateway }}"
+          metric: 100
+
+    lima1:
+      dhcp4: false
+      dhcp6: false
+      accept-ra: false
+      link-local: []
+      optional: true
