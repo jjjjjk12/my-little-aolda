@@ -1,13 +1,17 @@
 # 중첩 ARM64 VM 검증
 
-Mac의 Ansible에서 SSH로 Ubuntu 노드를 설정하고, 그 안에서 작은 CirrOS 게스트를 KVM으로 부팅한다. 현재 검증 대상은 Lima의 `aolda-probe`이며, 전체 OpenStack 배포 디렉터리 구조를 확정한 것은 아니다.
+Mac의 Ansible에서 SSH로 Ubuntu 노드를 설정하고, 그 안에서 작은 CirrOS 게스트를 KVM으로 부팅한다. 검증 대상은 Lima의 `aolda-probe` 또는 `mla` 그룹의 세 노드이며, 전체 OpenStack 배포 디렉터리 구조를 확정한 것은 아니다.
 
 ## 파일
 
-- `inventory.ini`: 사용자가 작성한 Lima SSH 접속 정보.
-- `probe-vars.yml`: 게스트 이미지 URL·SHA256, VM 내부 작업 경로, 펌웨어, CPU·메모리.
-- `prepare-probe.yml`: 사전 조건 검사, 패키지 설치, 이미지 다운로드, 검증 스크립트 배치.
-- `verify-probe.yml`: 실제 부팅 검증 및 결과를 Mac으로 가져오기.
+- `inventory/inventory.ini`: 기존 `probe` 그룹의 Lima SSH 접속 정보.
+- `inventory/inventory-lima.ini`: `mla` 그룹의 세 노드 SSH 접속 정보.
+- `var/lima-vars.yml`: Lima VM 사양과 이미지, 노드 목록.
+- `playbook/create-lima.yml`: 디스크·VM 생성 및 부팅. YAML 출력 위치는 프로젝트의 `lima/vm/`.
+- `templates/lima-node.yaml.j2`: VM별 Lima YAML 템플릿.
+- `playbook/probe-vars.yml`: 게스트 이미지 URL·SHA256, VM 내부 작업 경로, 펌웨어, CPU·메모리.
+- `playbook/prepare-probe.yml`: 사전 조건 검사, 패키지 설치, 이미지 다운로드, 검증 스크립트 배치.
+- `playbook/verify-probe.yml`: 실제 부팅 검증 및 결과를 Mac으로 가져오기.
 - `files/verify-nested.py`: QMP의 KVM 상태 확인, 시리얼 로그인, 게스트 명령 실행, 정상 종료.
 - `artifacts/<inventory 호스트명>/`: 매 실행의 결과와 시리얼 로그. 실행마다 갱신하며 Git 추적에서 제외한다.
 
@@ -19,12 +23,29 @@ Mac에서 실행한다. Ansible과 Lima가 설치되어 있어야 한다.
 limactl start aolda-probe
 cd /Users/jjjjjk12/Migration/dev/mla/ansible
 
-ansible probe -i inventory.ini -m ansible.builtin.ping
-ansible-playbook -i inventory.ini prepare-probe.yml --syntax-check
-ansible-playbook -i inventory.ini verify-probe.yml --syntax-check
-ansible-playbook -i inventory.ini prepare-probe.yml
-ansible-playbook -i inventory.ini verify-probe.yml
+ansible probe -i inventory/inventory.ini -m ansible.builtin.ping
+ansible-playbook -i inventory/inventory.ini playbook/prepare-probe.yml --syntax-check
+ansible-playbook -i inventory/inventory.ini playbook/verify-probe.yml --syntax-check
+ansible-playbook -i inventory/inventory.ini playbook/prepare-probe.yml
+ansible-playbook -i inventory/inventory.ini playbook/verify-probe.yml
 ```
+
+`mla` 그룹을 사용할 때도 위와 같이 `ansible/` 디렉터리에서 실행한다.
+
+```bash
+ansible mla -i inventory/inventory-lima.ini -m ansible.builtin.ping
+ansible-playbook -i inventory/inventory-lima.ini playbook/prepare-probe.yml -e target_group=mla
+ansible-playbook -i inventory/inventory-lima.ini playbook/verify-probe.yml -e target_group=mla
+```
+
+VM 생성 플레이북은 Mac 자체를 대상으로 실행한다.
+
+```bash
+ansible-playbook -i localhost, playbook/create-lima.yml --syntax-check
+ansible-playbook -i localhost, playbook/create-lima.yml
+```
+
+플레이북의 로컬 파일 참조는 플레이북 위치를 기준으로 한다. 검증 결과는 플레이북 폴더 아래가 아닌 `ansible/artifacts/`에 저장한다.
 
 설치 단계는 반복 적용할 수 있다. 설치 직후 다시 실행하면 변경이 없어야 한다. apt 캐시 유효기간(1시간)이 지나면 캐시 갱신이 변경으로 보고될 수 있다. 검증 단계는 실행할 때마다 내부 VM을 새로 부팅한다. `--check`는 실제 부팅을 하지 않으므로 검증 성공의 근거로 사용하지 않는다.
 
@@ -51,7 +72,7 @@ ansible-playbook -i inventory.ini verify-probe.yml
 
 ## 이식성과 남은 검증
 
-플레이북에는 Lima 실행 명령이나 Mac 사용자 경로를 넣지 않았다. 다른 Ubuntu 24.04 ARM64 KVM 호스트를 검증할 때는 inventory의 SSH 정보와 필요한 환경 변수를 바꾼다. x86 호스트는 사전 검사에서 실패하며, x86용 이미지·QEMU·펌웨어 검증 구성을 별도로 추가해야 한다.
+중첩 부팅 검증용 플레이북에는 Lima 실행 명령이나 Mac 사용자 경로를 넣지 않았다. VM 생성용 플레이북은 Mac의 Lima를 사용한다. 다른 Ubuntu 24.04 ARM64 KVM 호스트를 검증할 때는 inventory의 SSH 정보와 필요한 환경 변수를 바꾼다. x86 호스트는 사전 검사에서 실패하며, x86용 이미지·QEMU·펌웨어 검증 구성을 별도로 추가해야 한다.
 
 CirrOS 이미지는 체크섬을 고정했다. apt 패키지는 `state: present`이므로 패키지 버전까지 완전히 고정한 재현 환경은 아직 아니다. 이후 배포 버전 조합을 확정할 때 저장소와 패키지 버전 정책을 정한다.
 

@@ -1,6 +1,6 @@
 ---
 - name: Prepare ARM64 nested virtualization probe
-  hosts: probe
+  hosts: "{{ target_group | default('probe') }}"
   become: true
   vars_files:
     - probe-vars.yml
@@ -56,7 +56,7 @@
 
     - name: Install repeatable boot verification script
       ansible.builtin.copy:
-        src: files/verify-nested.py
+        src: "{{ playbook_dir }}/../files/verify-nested.py"
         dest: "{{ probe_dir }}/verify-nested.py"
         owner: root
         group: root

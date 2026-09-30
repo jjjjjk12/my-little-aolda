@@ -6,11 +6,11 @@
   become: false
 
   vars_files:
-    - lima-vars.yml
+    - ../var/lima-vars.yml
 
   vars:
     ansible_python_interpreter: "{{ ansible_playbook_python }}"
-    lima_output_dir: "{{ playbook_dir }}/../lima/vm"
+    lima_output_dir: "{{ playbook_dir }}/../../lima/vm"
 
   tasks:
     - name: Check Lima is available
@@ -82,7 +82,7 @@
 
     - name: Render Lima configuration
       ansible.builtin.template:
-        src: lima-node.yaml.j2
+        src: "{{ playbook_dir }}/../templates/lima-node.yaml.j2"
         dest: "{{ lima_output_dir }}/{{ item.name }}.yaml"
         mode: "0644"
       loop: "{{ lima_nodes }}"

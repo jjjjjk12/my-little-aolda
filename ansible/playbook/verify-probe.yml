@@ -1,6 +1,6 @@
 ---
 - name: Verify a real ARM64 guest boot using KVM
-  hosts: probe
+  hosts: "{{ target_group | default('probe') }}"
   become: true
   gather_facts: false
   vars_files:
@@ -33,7 +33,7 @@
         - name: Fetch boot log and machine-readable result
           ansible.builtin.fetch:
             src: "{{ probe_dir }}/{{ item }}"
-            dest: "{{ playbook_dir }}/artifacts/{{ inventory_hostname }}/{{ item }}"
+            dest: "{{ playbook_dir }}/../artifacts/{{ inventory_hostname }}/{{ item }}"
             flat: true
           loop:
             - serial.log
