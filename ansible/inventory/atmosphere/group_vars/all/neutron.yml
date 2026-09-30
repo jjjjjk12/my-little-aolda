@@ -1,0 +1,23 @@
+neutron_networks:
+- external: true
+  mtu_size: 1500
+  name: public
+  port_security_enabled: true
+  provider_network_type: flat
+  provider_physical_network: external
+  shared: true
+  subnets:
+  - allocation_pool_end: 192.168.120.200
+    allocation_pool_start: 192.168.120.101
+    cidr: 192.168.120.0/24
+    enable_dhcp: false
+    gateway_ip: 192.168.120.1
+    name: public-subnet
+neutron_helm_values:
+  conf:
+    auto_bridge_add:
+      br-ex: lima1
+    plugins:
+      openvswitch_agent:
+        ovs:
+          bridge_mappings: external:br-ex

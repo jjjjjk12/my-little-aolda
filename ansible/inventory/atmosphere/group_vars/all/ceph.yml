@@ -1,0 +1,14 @@
+ceph_fsid: 3945a105-c03b-5372-a447-7524d67732da
+ceph_mon_public_network: 192.168.110.0/24
+ceph_version: "18.2.7"
+cephadm_image: >-
+  quay.io/ceph/ceph:v18.2.7@sha256:1b9158ce28975f95def6a0ad459fa19f1336506074267a4b47c1bd914a00fec0
+
+# Memory target for each OSD sharing a lab node with Kubernetes.
+ceph_conf_overrides:
+  - section: osd
+    option: osd_memory_target_autotune
+    value: "false"
+  - section: osd
+    option: osd_memory_target
+    value: "2147483648"

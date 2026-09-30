@@ -1,0 +1,22 @@
+---
+# ARM64 전용 HAProxy 이미지
+atmosphere_image_overrides:
+  percona_xtradb_cluster_haproxy: >-
+    docker.io/percona/haproxy:2.8.15-arm64@sha256:bbc5b3b66ac985d1a4500195539e7dff5196245a5a842a6858ea0848ec089967
+
+# 소규모 실습용 데이터베이스 설정
+percona_xtradb_cluster_spec:
+  pxc:
+    size: 3
+    configuration: |
+      [mysqld]
+      max_connections=512
+      innodb_buffer_pool_size=512M
+      skip-name-resolve
+      pxc_strict_mode=MASTER
+    volumeSpec:
+      persistentVolumeClaim:
+        resources:
+          requests:
+            storage: 5Gi
+            

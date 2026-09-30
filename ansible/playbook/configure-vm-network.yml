@@ -90,3 +90,33 @@
         msg:
           addresses: "{{ interface_addresses.stdout_lines }}"
           routes: "{{ ipv4_routes.stdout_lines }}"
+
+    - name: Register cluster node management addresses
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE MANAGED MLA NODES"
+        backup: true
+        block: |
+          {% for node, address in mla_management_addresses | dictsort %}
+          {{ address }} {{ node }}
+          {% endfor %}
+      tags:
+        - hosts
+
+    - name: Preserve the configured hostname
+      ansible.builtin.copy:
+        dest: /etc/cloud/cloud.cfg.d/99-mla-hostname.cfg
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          preserve_hostname: true
+      tags:
+        - hosts
+
+    - name: Set the cluster node hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname_short }}"
+        use: systemd
+      tags:
+        - hosts

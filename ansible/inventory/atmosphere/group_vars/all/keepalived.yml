@@ -1,0 +1,2 @@
+keepalived_interface: lima0
+keepalived_vip: 192.168.110.121
