@@ -19,4 +19,71 @@ percona_xtradb_cluster_spec:
         resources:
           requests:
             storage: 5Gi
-            
+
+# 로그 저장: 3GiB, 보관 기간 24시간
+loki_helm_values:
+  loki:
+    limits_config:
+      retention_period: 24h
+  singleBinary:
+    replicas: 1
+    persistence:
+      size: 3Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+
+# 메트릭 및 알림 저장 공간 축소
+kube_prometheus_stack_helm_values:
+  prometheus:
+    prometheusSpec:
+      replicas: 1
+      retention: 2d
+      retentionSize: 4GB
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 5Gi
+  alertmanager:
+    alertmanagerSpec:
+      replicas: 1
+      retention: 24h
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 1Gi
+
+# RabbitMQ 클러스터별 저장 공간 및 메모리 조정
+rabbitmq_spec:
+  replicas: 1
+  persistence:
+    storage: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
