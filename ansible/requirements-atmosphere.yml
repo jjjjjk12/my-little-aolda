@@ -1,0 +1,4 @@
+---
+collections:
+  - name: vexxhost.atmosphere
+    version: "7.8.1"
