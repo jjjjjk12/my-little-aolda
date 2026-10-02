@@ -23,15 +23,39 @@
           - --version
       changed_when: false
 
+    - name: Create Lima configuration directory
+      ansible.builtin.file:
+        path: "{{ lima_home }}/_config"
+        state: directory
+        mode: '0700'
+
+    - name: Inspect the network configuration
+      ansible.builtin.stat:
+        path: "{{ networks_file }}"
+      register: mla_network_file
+
     - name: Read existing Lima network definitions
       ansible.builtin.slurp:
         src: "{{ networks_file }}"
       register: networks_source
+      when: mla_network_file.stat.exists
 
     - name: Parse existing network definitions
+      when: mla_network_file.stat.exists
       ansible.builtin.set_fact:
         existing_network_config: >-
           {{ networks_source.content | b64decode | from_yaml }}
+
+    - name: Initialize network paths on a fresh Mac
+      when: not mla_network_file.stat.exists
+      ansible.builtin.set_fact:
+        existing_network_config:
+          group: admin
+          paths:
+            socketVMNet: /opt/socket_vmnet/bin/socket_vmnet
+            sudoers: /private/etc/sudoers.d/lima
+            varRun: /private/var/run/lima
+          networks: {}
 
     - name: Build lab network definitions
       ansible.builtin.set_fact:

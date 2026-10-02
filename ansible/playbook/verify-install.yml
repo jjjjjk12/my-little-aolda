@@ -1,0 +1,93 @@
+---
+- name: Verify service readiness after installation
+  hosts: controllers[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for core API and Skyline deployments
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: openstack
+        name: "{{ item }}"
+        wait: true
+        wait_timeout: 600
+        wait_condition: {type: Available, status: 'True'}
+      loop:
+        - keystone-api
+        - glance-api
+        - cinder-api
+        - cinder-scheduler
+        - cinder-volume
+        - placement-api
+        - nova-api-osapi
+        - nova-scheduler
+        - nova-conductor
+        - neutron-server
+        - neutron-rpc-server
+        - skyline
+    - name: Wait for all compute and network agents to finish updating
+      ansible.builtin.command:
+        argv: [kubectl, rollout, status, "daemonset/{{ item }}", -n, openstack, --timeout=600s]
+      changed_when: false
+      loop:
+        - libvirt-libvirt-default
+        - nova-compute-default
+        - openvswitch
+        - neutron-dhcp-agent-default
+        - neutron-l3-agent-default
+        - neutron-metadata-agent-default
+        - neutron-ovs-agent-default
+    - name: Read the Kubernetes nodes
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: mla_verified_nodes
+    - name: Require every inventory node to be ready
+      ansible.builtin.assert:
+        that:
+          - groups['controllers'] | difference(mla_verified_nodes.resources | map(attribute='metadata.name') | list) | length == 0
+    - name: Require healthy conditions on lab nodes
+      ansible.builtin.assert:
+        that:
+          - item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list == ['True']
+          - item.status.conditions | selectattr('type', 'in', ['MemoryPressure', 'DiskPressure', 'PIDPressure']) | selectattr('status', 'equalto', 'True') | list | length == 0
+      loop: "{{ mla_verified_nodes.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      when: item.metadata.name in groups['controllers']
+    - name: Check Ceph without exposing authentication material
+      ansible.builtin.command:
+        argv: [cephadm, shell, --, ceph, status, --format, json]
+      register: mla_verified_ceph
+      changed_when: false
+    - name: Require all Ceph OSDs and clean placement groups
+      ansible.builtin.assert:
+        that:
+          - (mla_verified_ceph.stdout | from_json).osdmap.num_osds | int > 0
+          - (mla_verified_ceph.stdout | from_json).osdmap.num_up_osds == (mla_verified_ceph.stdout | from_json).osdmap.num_osds
+          - (mla_verified_ceph.stdout | from_json).osdmap.num_in_osds == (mla_verified_ceph.stdout | from_json).osdmap.num_osds
+          - (mla_verified_ceph.stdout | from_json).pgmap.pgs_by_state | rejectattr('state_name', 'equalto', 'active+clean') | list | length == 0
+          - (mla_verified_ceph.stdout | from_json).health.status != 'HEALTH_ERR'
+    - name: Report remaining Ceph warnings
+      ansible.builtin.debug:
+        msg: "{{ (mla_verified_ceph.stdout | from_json).health.status }}"
+    - name: Verify an actual Skyline login using existing cloud credentials
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_python_interpreter }}"
+          - -c
+          - |
+            import openstack.config, requests, sys
+            cloud = openstack.config.get_cloud_region(cloud='atmosphere')
+            auth = cloud.config['auth']
+            session = requests.Session()
+            session.verify = '/usr/local/share/ca-certificates/atmosphere.crt'
+            response = session.post('https://' + sys.argv[1] + '/api/openstack/skyline/api/v1/login',
+                json={'region': cloud.config.get('region_name', 'RegionOne'),
+                      'domain': auth.get('user_domain_id', 'default'),
+                      'username': auth['username'], 'password': auth['password']}, timeout=30)
+            assert response.status_code == 200 and session.cookies, 'Skyline login failed'
+          - "{{ mla_skyline_host }}"
+      changed_when: false
+      no_log: true

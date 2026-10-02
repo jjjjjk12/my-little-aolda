@@ -34,8 +34,9 @@
         dest: /etc/netplan/90-mla-network.yaml
         owner: root
         group: root
-        mode: "0666"
+        mode: "0600"
         backup: true
+      register: mla_netplan_file
 
     - name: Validate merged Netplan configuration
       ansible.builtin.command:
@@ -45,6 +46,7 @@
       changed_when: false
 
     - name: Apply Netplan asynchronously
+      when: mla_netplan_file.changed
       ansible.builtin.command:
         argv:
           - netplan
@@ -55,11 +57,13 @@
       changed_when: true
 
     - name: Wait for SSH connectivity
+      when: mla_netplan_file.changed
       ansible.builtin.wait_for_connection:
         delay: 5
         timeout: 120
 
     - name: Check Netplan application result
+      when: mla_netplan_file.changed
       ansible.builtin.async_status:
         jid: "{{ netplan_apply.ansible_job_id }}"
       register: netplan_apply_result

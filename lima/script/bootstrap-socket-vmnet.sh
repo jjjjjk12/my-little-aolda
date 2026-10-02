@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --binary-only ) ]]; then
+  echo "Usage: $0 [--binary-only]" >&2
+  exit 2
+fi
+
 VERSION="1.2.2"
 ARCHIVE="socket_vmnet-${VERSION}-arm64.tar.gz"
 SHA256="c7bf62308fbcfdc29bdfb8373c9b1951f7ac2396446e4390919796a94972e6dc"
@@ -28,6 +33,11 @@ curl --fail --location --retry 3 \
 sudo tar -xzvf "$WORK_DIR/$ARCHIVE" \
   -C / opt/socket_vmnet
 
+if [[ "${1:-}" == --binary-only ]]; then
+  echo "socket_vmnet 설치 완료. 네트워크와 sudoers는 설치 플레이북에서 설정합니다."
+  exit 0
+fi
+
 limactl sudoers > "$WORK_DIR/lima-sudoers"
 
 cat "$WORK_DIR/lima-sudoers"
@@ -39,7 +49,7 @@ if sudo test -e /etc/sudoers.d/lima; then
   echo "기존 권한 설정 백업: $BACKUP"
 fi
 
-sudo install -o root -g wheel -m 0440 \
+sudo install -o root -g wheel -m 0444 \
   "$WORK_DIR/lima-sudoers" \
   /etc/sudoers.d/lima
 

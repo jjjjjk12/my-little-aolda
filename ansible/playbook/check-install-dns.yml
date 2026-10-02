@@ -1,0 +1,30 @@
+---
+- name: Verify guest DNS before deploying services
+  hosts: controllers
+  become: false
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Resolve the required endpoints from every VM
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import socket, sys
+            expected = sys.argv[1]
+            for host in sys.argv[2:]:
+                addresses = {x[4][0] for x in socket.getaddrinfo(host, None, socket.AF_INET)}
+                assert addresses == {expected}, 'Incorrect DNS for ' + host
+            print('Guest DNS verified')
+          - "{{ keepalived_vip }}"
+          - "{{ openstack_helm_endpoints_keystone_api_host }}"
+          - "{{ openstack_helm_endpoints_glance_api_host }}"
+          - "{{ openstack_helm_endpoints_nova_api_host }}"
+          - "{{ openstack_helm_endpoints_neutron_api_host }}"
+          - "{{ openstack_helm_endpoints_cinder_api_host }}"
+          - "{{ openstack_helm_endpoints_placement_api_host }}"
+          - "{{ keycloak_host }}"
+          - "{{ mla_skyline_host }}"
+      changed_when: false

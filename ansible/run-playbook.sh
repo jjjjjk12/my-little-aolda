@@ -15,4 +15,4 @@ if [[ $# -eq 0 ]]; then
     set -- ansible/playbook/site.yml -b
 fi
 exec "$project_root/.venv-atmosphere/bin/ansible-playbook" \
-    -i ansible/inventory/atmosphere/hosts.ini "$@"
+    -i "${MLA_INVENTORY:-$project_root/ansible/inventory/atmosphere/hosts.ini}" "$@"

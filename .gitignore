@@ -1,3 +1,5 @@
 .venv-atmosphere/
 .ansible/
 /ansible/inventory/atmosphere/group_vars/all/secrets.yml
+/ansible/artifacts/
+__pycache__/

@@ -1,0 +1,28 @@
+# Validated collection set; install with --no-deps.
+collections:
+- name: ansible.netcommon
+  version: 1.2.0
+- name: ansible.posix
+  version: 1.6.0
+- name: ansible.utils
+  version: 6.1.1
+- name: atmosphere.common
+  version: 0.7.1
+- name: community.crypto
+  version: 2.2.3
+- name: community.general
+  version: 7.3.0
+- name: community.mysql
+  version: 3.6.0
+- name: kubernetes.core
+  version: 2.4.0
+- name: openstack.cloud
+  version: 2.6.0
+- name: vexxhost.atmosphere
+  version: 7.8.1
+- name: vexxhost.ceph
+  version: 4.2.0
+- name: vexxhost.containers
+  version: 1.6.8
+- name: vexxhost.kubernetes
+  version: 3.4.0
