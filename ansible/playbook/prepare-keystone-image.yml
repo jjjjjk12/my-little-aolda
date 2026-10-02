@@ -1,0 +1,62 @@
+---
+- name: Prepare the Keystone OpenID module on all controllers
+  hosts: controllers
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Create build directory
+      ansible.builtin.file:
+        path: "{{ mla_keystone_build_directory }}"
+        state: directory
+        mode: '0755'
+    - name: Render Keystone Dockerfile
+      ansible.builtin.template:
+        src: ../templates/keystone.Dockerfile.j2
+        dest: "{{ mla_keystone_build_directory }}/Dockerfile"
+        mode: '0644'
+      register: mla_keystone_dockerfile
+    - name: Check Docker image
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ mla_keystone_image }}"]
+      register: mla_keystone_docker_image
+      changed_when: false
+      failed_when: mla_keystone_docker_image.rc != 0 and 'No such image' not in mla_keystone_docker_image.stderr
+    - name: Build Keystone image with the missing OpenID module
+      ansible.builtin.command:
+        argv: [docker, build, --network=host, --tag, "{{ mla_keystone_image }}", "{{ mla_keystone_build_directory }}"]
+      when: mla_keystone_dockerfile.changed or mla_keystone_docker_image.rc != 0
+      register: mla_keystone_build
+      changed_when: true
+    - name: Verify Apache loads the OpenID module
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network=none
+          - --entrypoint=/bin/bash
+          - "{{ mla_keystone_image }}"
+          - -ec
+          - 'source /etc/apache2/envvars; apache2 -M | grep auth_openidc_module'
+      changed_when: false
+    - name: List Kubernetes runtime images
+      ansible.builtin.command:
+        argv: [ctr, --namespace, k8s.io, images, list, --quiet]
+      changed_when: false
+      register: mla_keystone_runtime_images
+    - name: Import image into the Kubernetes runtime
+      when: mla_keystone_build.changed or mla_keystone_image not in mla_keystone_runtime_images.stdout_lines
+      block:
+        - name: Save the verified image
+          ansible.builtin.command:
+            argv: [docker, save, --output, "{{ mla_keystone_build_directory }}/image.tar", "{{ mla_keystone_image }}"]
+          changed_when: true
+        - name: Import the local ARM64 image into containerd
+          ansible.builtin.command:
+            argv: [ctr, --namespace, k8s.io, images, import, --platform, linux/arm64, "{{ mla_keystone_build_directory }}/image.tar"]
+          changed_when: true
+      always:
+        - name: Remove the temporary image archive
+          ansible.builtin.file:
+            path: "{{ mla_keystone_build_directory }}/image.tar"
+            state: absent

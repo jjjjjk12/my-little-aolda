@@ -1,0 +1,6 @@
+FROM {{ mla_keystone_base_image }}
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libapache2-mod-auth-openidc={{ mla_keystone_oidc_package_version }} \
+ && a2enmod auth_openidc \
+ && rm -rf /var/lib/apt/lists/*

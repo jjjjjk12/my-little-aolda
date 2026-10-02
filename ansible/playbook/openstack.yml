@@ -1,0 +1,107 @@
+---
+# Derived from Atmosphere 7.8.1 playbooks; upstream roles remain unchanged.
+# Copyright (c) VEXXHOST, Inc. Licensed under Apache-2.0.
+# https://www.apache.org/licenses/LICENSE-2.0
+# Lab selection: core OpenStack + Skyline; reduced monitoring.
+- name: Deploy OpenStack
+  hosts: controllers[0]
+  become: true
+  pre_tasks:
+  - name: Fail if atmosphere_ceph_enabled is set
+    ansible.builtin.fail:
+      msg: The "atmosphere_ceph_enabled" variable is no longer supported. Please use the "atmosphere_storage" variable
+        to configure storage backends instead. Refer to the storage configuration documentation for migration instructions.
+    when: atmosphere_ceph_enabled is defined
+  roles:
+  # Rook service-project tasks invoke the CLI before the final CLI play.
+  - role: vexxhost.atmosphere.openstack_cli
+    tags:
+    - openstack-cli
+  - role: vexxhost.atmosphere.memcached
+    tags:
+    - memcached
+  - role: vexxhost.atmosphere.keystone
+    tags:
+    - keystone
+  - role: vexxhost.atmosphere.rook_ceph
+    tags:
+    - rook-ceph
+  - role: vexxhost.atmosphere.rook_ceph_cluster
+    tags:
+    - rook-ceph-cluster
+  - role: vexxhost.atmosphere.ceph_provisioners
+    tags:
+    - ceph-provisioners
+  - role: vexxhost.atmosphere.glance
+    tags:
+    - glance
+  - role: vexxhost.atmosphere.cinder
+    tags:
+    - cinder
+  - role: vexxhost.atmosphere.placement
+    tags:
+    - placement
+  environment:
+    CEPH_CONTAINER_IMAGE: '{{ cephadm_image | default(''quay.io/ceph/ceph:v'' + (ceph_version | default(''18.2.7'')))
+      }}'
+    CEPH_CONTAINER_BINARY: docker
+    CEPHADM_IMAGE: '{{ cephadm_image }}'
+- name: Configure operating system
+  hosts: controllers:computes
+  become: true
+  roles:
+  - role: vexxhost.atmosphere.lpfc
+    tags:
+    - lpfc
+  - role: vexxhost.atmosphere.multipathd
+    tags:
+    - multipathd
+  - role: vexxhost.atmosphere.iscsi
+    tags:
+    - iscsi
+  - role: vexxhost.atmosphere.udev
+    tags:
+    - udev
+- name: Deploy SDN
+  hosts: controllers:computes
+  become: true
+  gather_facts: false
+  roles:
+  - role: vexxhost.atmosphere.openvswitch
+    tags:
+    - openvswitch
+  - role: vexxhost.atmosphere.frr_k8s
+    when: ovn_bgp_agent_enabled | default(false)
+    tags:
+    - frr_k8s
+  - role: vexxhost.atmosphere.ovn
+    tags:
+    - ovn
+- hosts: controllers[0]
+  become: true
+  roles:
+  - role: vexxhost.atmosphere.libvirt
+    tags:
+    - libvirt
+  - role: vexxhost.atmosphere.coredns
+    tags:
+    - coredns
+  - role: vexxhost.atmosphere.nova
+    tags:
+    - nova
+  - role: vexxhost.atmosphere.neutron
+    tags:
+    - neutron
+  - role: vexxhost.atmosphere.openstack_exporter
+    tags:
+    - openstack-exporter
+- hosts: controllers
+  become: true
+  roles:
+  - role: vexxhost.atmosphere.openstack_cli
+    tags:
+    - openstack-cli
+
+- name: Apply the Neutron 2025.2 worker probe compatibility fix
+  ansible.builtin.import_playbook: fix-neutron-health-probe.yml
+  tags: [neutron]

@@ -1,0 +1,98 @@
+---
+# Run only for interrupted initial migrations with quotas.project_id missing.
+- name: Recover the interrupted official Neutron migration
+  hosts: controllers[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for the database cluster to recover
+      kubernetes.core.k8s_info:
+        api_version: pxc.percona.com/v1
+        kind: PerconaXtraDBCluster
+        namespace: openstack
+        name: percona-xtradb
+      register: mla_pxc_recovery
+      until: (mla_pxc_recovery.resources[0].status.state | default('')) == 'ready'
+      retries: 60
+      delay: 10
+    - name: Inspect any earlier recovery job
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: Job
+        namespace: openstack
+        name: "{{ mla_neutron_recovery_job | default('mla-neutron-migration-recovery') }}"
+      register: mla_previous_recovery
+      no_log: true
+    - name: Remove only a failed recovery job so it can be retried
+      kubernetes.core.k8s:
+        api_version: batch/v1
+        kind: Job
+        namespace: openstack
+        name: "{{ mla_neutron_recovery_job | default('mla-neutron-migration-recovery') }}"
+        state: absent
+        wait: true
+      when:
+        - mla_previous_recovery.resources | length > 0
+        - (mla_previous_recovery.resources[0].status.failed | default(0) | int) > 0
+    - name: Read the original DB migration job
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: Job
+        namespace: openstack
+        name: neutron-db-sync
+      register: mla_neutron_sync
+      no_log: true
+    - name: Require original migration job
+      ansible.builtin.assert:
+        that: mla_neutron_sync.resources | length == 1
+    - name: Suspend normal migration to avoid concurrent schema changes
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata: {name: neutron-db-sync, namespace: openstack}
+          spec: {suspend: true}
+    - name: Wait until the normal migration pod stops
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: openstack
+        label_selectors: [job-name=neutron-db-sync]
+      register: mla_neutron_sync_pods
+      until: mla_neutron_sync_pods.resources | length == 0
+      retries: 30
+      delay: 2
+    - name: Run the official intermediate migration using the existing job configuration
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata: {name: "{{ mla_neutron_recovery_job | default('mla-neutron-migration-recovery') }}", namespace: openstack}
+          spec:
+            backoffLimit: 0
+            template:
+              metadata:
+                labels: {application: mla-neutron-migration-recovery}
+              spec: "{{ mla_neutron_sync.resources[0].spec.template.spec | combine({'restartPolicy': 'Never', 'containers': [mla_neutron_sync.resources[0].spec.template.spec.containers[0] | combine({'command': ['python3', '-c', lookup('file', '../files/recover-neutron-migration.py')], 'args': []})]}) }}"
+      no_log: true
+    - name: Wait for recovery success or failure
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: Job
+        namespace: openstack
+        name: "{{ mla_neutron_recovery_job | default('mla-neutron-migration-recovery') }}"
+      register: mla_recovery_status
+      until: ((mla_recovery_status.resources[0].status.succeeded | default(0) | int) > 0) or ((mla_recovery_status.resources[0].status.failed | default(0) | int) > 0)
+      retries: 60
+      delay: 10
+      no_log: true
+    - name: Require successful recovery before resuming
+      ansible.builtin.assert:
+        that: (mla_recovery_status.resources[0].status.succeeded | default(0) | int) == 1
+    - name: Resume normal migration after recovery succeeds
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata: {name: neutron-db-sync, namespace: openstack}
+          spec: {suspend: false}

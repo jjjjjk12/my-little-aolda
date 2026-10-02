@@ -1,0 +1,129 @@
+---
+# Derived from Atmosphere 7.8.1 and vexxhost.kubernetes 3.4.0.
+# Copyright VEXXHOST, Inc.; Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+# Apply download timeout and fail-fast directly to each play: imports do not propagate these settings.
+- hosts: '{{ target | default(''all'') }}'
+  become: true
+  roles:
+  - role: vexxhost.atmosphere.defaults
+  - role: vexxhost.atmosphere.sysctl
+    tags:
+    - sysctl
+  - role: vexxhost.atmosphere.ethtool
+    tags:
+    - ethtool
+    when: ansible_facts['os_family'] in ['Debian']
+  post_tasks:
+  - name: Set a fact with the "atmosphere_images" for other plays
+    ansible.builtin.set_fact:
+      atmosphere_images: '{{ atmosphere_images }}'
+      atmosphere_kubernetes_version: '{{ atmosphere_kubernetes_version }}'
+    tags:
+    - always
+  any_errors_fatal: true
+  module_defaults:
+    ansible.builtin.get_url:
+      timeout: 120
+- name: Configure Kubernetes VIP
+  hosts: '{{ kubernetes_control_plane_group | default(''controllers'') }}'
+  become: true
+  roles:
+  - role: vexxhost.kubernetes.kube_vip
+    tags:
+    - kube-vip
+  vars:
+    keepalived_image: '{{ atmosphere_images[''keepalived''] }}'
+    keepalived_vrid: '{{ kubernetes_keepalived_vrid }}'
+    keepalived_interface: '{{ kubernetes_keepalived_interface }}'
+    keepalived_vip: '{{ kubernetes_keepalived_vip }}'
+    haproxy_image: '{{ atmosphere_images[''haproxy''] }}'
+    containerd_pause_image: '{{ atmosphere_images[''pause''] }}'
+    kubernetes_image_repository: '{{ atmosphere_images[''kube_apiserver''] | vexxhost.kubernetes.docker_image(''prefix'')
+      }}'
+    kubernetes_version: '{{ atmosphere_kubernetes_version }}'
+    cilium_node_image: '{{ atmosphere_images[''cilium_node''] }}'
+    cilium_operator_image: '{{ atmosphere_images[''cilium_operator''] }}'
+    kube_vip_image: '{{ atmosphere_images[''kube_vip''] }}'
+  any_errors_fatal: true
+  module_defaults:
+    ansible.builtin.get_url:
+      timeout: 120
+- name: Install Kubernetes
+  hosts: '{{ kubernetes_group | default(''all'') }}'
+  become: true
+  roles:
+  - role: vexxhost.containers.containerd
+    tags:
+    - containerd
+  - role: vexxhost.kubernetes.kubernetes
+    tags:
+    - kubernetes
+  vars:
+    keepalived_image: '{{ atmosphere_images[''keepalived''] }}'
+    keepalived_vrid: '{{ kubernetes_keepalived_vrid }}'
+    keepalived_interface: '{{ kubernetes_keepalived_interface }}'
+    keepalived_vip: '{{ kubernetes_keepalived_vip }}'
+    haproxy_image: '{{ atmosphere_images[''haproxy''] }}'
+    containerd_pause_image: '{{ atmosphere_images[''pause''] }}'
+    kubernetes_image_repository: '{{ atmosphere_images[''kube_apiserver''] | vexxhost.kubernetes.docker_image(''prefix'')
+      }}'
+    kubernetes_version: '{{ atmosphere_kubernetes_version }}'
+    cilium_node_image: '{{ atmosphere_images[''cilium_node''] }}'
+    cilium_operator_image: '{{ atmosphere_images[''cilium_operator''] }}'
+    kube_vip_image: '{{ atmosphere_images[''kube_vip''] }}'
+  any_errors_fatal: true
+  module_defaults:
+    ansible.builtin.get_url:
+      timeout: 120
+- name: Install control-plane components
+  hosts: '{{ kubernetes_control_plane_group | default(''controllers'') }}'
+  become: true
+  roles:
+  - role: vexxhost.kubernetes.helm
+    tags:
+    - helm
+  - role: vexxhost.kubernetes.cilium
+    tags:
+    - cilium
+  - role: vexxhost.kubernetes.envoy_gateway
+    tags:
+    - envoy-gateway
+  vars:
+    keepalived_image: '{{ atmosphere_images[''keepalived''] }}'
+    keepalived_vrid: '{{ kubernetes_keepalived_vrid }}'
+    keepalived_interface: '{{ kubernetes_keepalived_interface }}'
+    keepalived_vip: '{{ kubernetes_keepalived_vip }}'
+    haproxy_image: '{{ atmosphere_images[''haproxy''] }}'
+    containerd_pause_image: '{{ atmosphere_images[''pause''] }}'
+    kubernetes_image_repository: '{{ atmosphere_images[''kube_apiserver''] | vexxhost.kubernetes.docker_image(''prefix'')
+      }}'
+    kubernetes_version: '{{ atmosphere_kubernetes_version }}'
+    cilium_node_image: '{{ atmosphere_images[''cilium_node''] }}'
+    cilium_operator_image: '{{ atmosphere_images[''cilium_operator''] }}'
+    kube_vip_image: '{{ atmosphere_images[''kube_vip''] }}'
+  any_errors_fatal: true
+  module_defaults:
+    ansible.builtin.get_url:
+      timeout: 120
+- hosts: '{{ target | default(''all'') }}'
+  become: true
+  roles:
+  - role: vexxhost.atmosphere.kubernetes_node_labels
+    tags:
+    - kubernetes-node-labels
+  any_errors_fatal: true
+  module_defaults:
+    ansible.builtin.get_url:
+      timeout: 120
+- hosts: '{{ target | default(''all'') }}'
+  become: true
+  gather_facts: false
+  tasks:
+  - name: Uninstall unattended-upgrades
+    ansible.builtin.package:
+      name: unattended-upgrades
+      state: absent
+  any_errors_fatal: true
+  module_defaults:
+    ansible.builtin.get_url:
+      timeout: 120

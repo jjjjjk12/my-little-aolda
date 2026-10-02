@@ -1,0 +1,69 @@
+---
+- name: Prepare the Skyline console package on all controllers
+  hosts: controllers
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Create build directory
+      ansible.builtin.file:
+        path: "{{ mla_skyline_build_directory }}"
+        state: directory
+        mode: '0755'
+    - name: Download the matching official console wheel
+      ansible.builtin.get_url:
+        url: "{{ mla_skyline_console_url }}"
+        dest: "{{ mla_skyline_build_directory }}/{{ mla_skyline_console_wheel }}"
+        checksum: "{{ mla_skyline_console_checksum }}"
+        mode: '0644'
+      register: mla_skyline_wheel
+    - name: Render Skyline Dockerfile
+      ansible.builtin.template:
+        src: ../templates/skyline.Dockerfile.j2
+        dest: "{{ mla_skyline_build_directory }}/Dockerfile"
+        mode: '0644'
+      register: mla_skyline_dockerfile
+    - name: Check Docker image
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ mla_skyline_image }}"]
+      register: mla_skyline_docker_image
+      changed_when: false
+      failed_when: mla_skyline_docker_image.rc != 0 and 'No such image' not in mla_skyline_docker_image.stderr
+    - name: Build Skyline image with the missing console package
+      ansible.builtin.command:
+        argv: [docker, build, --network=host, --tag, "{{ mla_skyline_image }}", "{{ mla_skyline_build_directory }}"]
+      when: mla_skyline_dockerfile.changed or mla_skyline_wheel.changed or mla_skyline_docker_image.rc != 0
+      register: mla_skyline_build
+      changed_when: true
+    - name: Verify Skyline console assets are installed
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network=none
+          - --entrypoint=python3
+          - "{{ mla_skyline_image }}"
+          - -c
+          - 'from skyline_console import static_path; assert (static_path / "index.html").is_file()'
+      changed_when: false
+    - name: List Kubernetes runtime images
+      ansible.builtin.command:
+        argv: [ctr, --namespace, k8s.io, images, list, --quiet]
+      changed_when: false
+      register: mla_skyline_runtime_images
+    - name: Import image into the Kubernetes runtime
+      when: mla_skyline_build.changed or mla_skyline_image not in mla_skyline_runtime_images.stdout_lines
+      block:
+        - name: Save the verified image
+          ansible.builtin.command:
+            argv: [docker, save, --output, "{{ mla_skyline_build_directory }}/image.tar", "{{ mla_skyline_image }}"]
+          changed_when: true
+        - name: Import the local ARM64 image into containerd
+          ansible.builtin.command:
+            argv: [ctr, --namespace, k8s.io, images, import, --platform, linux/arm64, "{{ mla_skyline_build_directory }}/image.tar"]
+          changed_when: true
+      always:
+        - name: Remove the temporary image archive
+          ansible.builtin.file:
+            path: "{{ mla_skyline_build_directory }}/image.tar"
+            state: absent

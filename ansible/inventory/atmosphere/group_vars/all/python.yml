@@ -1,0 +1,5 @@
+---
+# VM-side environment for Ansible modules and upstream pip tasks.
+# Bootstrap uses /usr/bin/python3 explicitly before this path exists.
+mla_python_venv: /opt/atmosphere/venv
+ansible_python_interpreter: "{{ mla_python_venv }}/bin/python3"

@@ -1,0 +1,4 @@
+FROM {{ mla_skyline_base_image }}
+COPY {{ mla_skyline_console_wheel }} /tmp/{{ mla_skyline_console_wheel }}
+RUN python3 -m pip install --no-deps --no-cache-dir /tmp/{{ mla_skyline_console_wheel }} \
+    && rm /tmp/{{ mla_skyline_console_wheel }}

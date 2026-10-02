@@ -1,0 +1,7 @@
+---
+# The pinned v3.3.6-6 ARM64 image contains an incompatible /tini binary.
+# Use the chart's supported direct startup path; its script execs ovsinit.
+openvswitch_helm_values:
+  pod:
+    tini:
+      enabled: false

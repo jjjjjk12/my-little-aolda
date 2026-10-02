@@ -1,0 +1,57 @@
+---
+- name: Create helper build directory
+  ansible.builtin.file:
+    path: "/var/lib/mla/arm64-cli/{{ mla_helper.name }}"
+    state: directory
+    mode: '0755'
+- name: Copy the verified CLI from the VM
+  ansible.builtin.copy:
+    src: /usr/bin/kubectl
+    dest: "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/kubectl"
+    remote_src: true
+    mode: '0755'
+  register: mla_helper_binary
+- name: Write Dockerfile with a pinned base
+  ansible.builtin.copy:
+    dest: "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/Dockerfile"
+    mode: '0644'
+    content: |
+      FROM {{ mla_helper.base }}
+      COPY kubectl /usr/local/bin/kubectl
+  register: mla_helper_dockerfile
+- name: Check existing helper image
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ mla_helper.image }}"]
+  register: mla_helper_existing
+  changed_when: false
+  failed_when: mla_helper_existing.rc != 0 and 'No such image' not in mla_helper_existing.stderr
+- name: Build helper image
+  ansible.builtin.command:
+    argv: [docker, build, --tag, "{{ mla_helper.image }}", "/var/lib/mla/arm64-cli/{{ mla_helper.name }}"]
+  when: mla_helper_existing.rc != 0 or mla_helper_binary.changed or mla_helper_dockerfile.changed
+  register: mla_helper_build
+  changed_when: true
+- name: Verify kubectl executes in the image
+  ansible.builtin.command:
+    argv: [docker, run, --rm, --network=none, --entrypoint=/usr/local/bin/kubectl, "{{ mla_helper.image }}", version, --client=true, --output=json]
+  changed_when: false
+- name: List runtime images
+  ansible.builtin.command: ctr --namespace k8s.io images list --quiet
+  changed_when: false
+  register: mla_helper_runtime
+- name: Import helper image into Kubernetes
+  when: mla_helper_build.changed or mla_helper.image not in mla_helper_runtime.stdout_lines
+  block:
+    - name: Export helper image
+      ansible.builtin.command:
+        argv: [docker, save, --output, "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/image.tar", "{{ mla_helper.image }}"]
+      changed_when: true
+    - name: Import helper image
+      ansible.builtin.command:
+        argv: [ctr, --namespace, k8s.io, images, import, --platform, linux/arm64, "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/image.tar"]
+      changed_when: true
+  always:
+    - name: Remove helper archive
+      ansible.builtin.file:
+        path: "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/image.tar"
+        state: absent

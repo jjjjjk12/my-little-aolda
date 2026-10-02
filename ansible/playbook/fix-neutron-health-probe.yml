@@ -1,0 +1,60 @@
+---
+# Neutron 2025.2 moves RabbitMQ sockets into ServiceWrapper children.
+# Keep the chart's RPC/socket checks, but include those worker processes.
+- name: Correct Neutron worker process health checks
+  hosts: controllers[0]
+  become: true
+  gather_facts: false
+  tags: [neutron]
+  vars:
+    mla_probe_old: "                    else:\n                        if p.ppid() == parentId:\n                            continue\n"
+    mla_probe_new: "                    # MLA: include ServiceWrapper worker sockets (Neutron 2025.2).\n"
+  tasks:
+    - name: Read the official Neutron probe
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: openstack
+        name: neutron-bin
+      register: mla_neutron_bin
+    - name: Validate the expected upstream probe before applying the workaround
+      ansible.builtin.assert:
+        that:
+          - mla_neutron_bin.resources | length == 1
+          - mla_probe_old in mla_neutron_bin.resources[0].data['health-probe.py'] or mla_probe_new in mla_neutron_bin.resources[0].data['health-probe.py']
+        fail_msg: The upstream probe changed; review this workaround before continuing.
+    - name: Include child process sockets in the existing health checks
+      ansible.builtin.set_fact:
+        mla_neutron_probe: "{{ mla_neutron_bin.resources[0].data['health-probe.py'] | replace(mla_probe_old, mla_probe_new) }}"
+    - name: Update only the probe script in the chart ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: neutron-bin
+            namespace: openstack
+          data:
+            health-probe.py: "{{ mla_neutron_probe }}"
+      register: mla_probe_update
+    - name: Reload probes when their contents change
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: "{{ item }}"
+            namespace: openstack
+          spec:
+            template:
+              metadata:
+                annotations:
+                  mla/health-probe-resource-version: "{{ mla_probe_update.result.metadata.resourceVersion }}"
+                  mla/health-probe-checksum: "{{ mla_neutron_probe | hash('sha256') }}"
+      loop:
+        - neutron-dhcp-agent-default
+        - neutron-l3-agent-default
+        - neutron-metadata-agent-default
+        - neutron-ovs-agent-default

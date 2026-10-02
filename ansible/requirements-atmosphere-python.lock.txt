@@ -1,3 +1,4 @@
+annotated-types==0.8.0
 ansible-core==2.18.6
 certifi==2026.7.22
 cffi==2.1.1
@@ -22,6 +23,8 @@ pbr==7.0.3
 platformdirs==4.12.2
 psutil==7.2.2
 pycparser==3.0
+pydantic==2.13.5
+pydantic_core==2.46.5
 PyYAML==6.0.3
 regex==2026.9.29
 requests==2.34.2
@@ -29,5 +32,6 @@ resolvelib==1.0.1
 rjsonnet==0.5.6
 setuptools==84.0.0
 stevedore==5.9.1
+typing-inspection==0.4.4
 typing_extensions==4.16.0
 urllib3==2.8.0

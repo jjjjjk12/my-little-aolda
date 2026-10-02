@@ -1,0 +1,279 @@
+---
+- name: Prepare the ARM64 Ceph image on every Ceph host
+  hosts: controllers:cephs
+  become: true
+  tasks:
+    - name: Require ARM64 hosts for this pinned image
+      ansible.builtin.assert:
+        that: ansible_architecture == 'aarch64'
+        fail_msg: This image digest and workaround are validated only on ARM64.
+      tags: [ceph-image]
+
+    - name: Refresh package metadata before installing prerequisites
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      tags: [ceph-prerequisites]
+
+    - name: Install Docker and the pinned cephadm tool
+      ansible.builtin.include_role:
+        name: vexxhost.ceph.cephadm
+        apply:
+          tags: [ceph-prerequisites]
+      tags: [ceph-prerequisites]
+
+    - name: Build and verify the image without accessing any host disks
+      tags: [ceph-image]
+      block:
+        - name: Create image build directory
+          ansible.builtin.file:
+            path: "{{ mla_ceph_build_directory }}"
+            state: directory
+            mode: '0755'
+
+        - name: Render the pinned Dockerfile
+          ansible.builtin.template:
+            src: ../templates/ceph.Dockerfile.j2
+            dest: "{{ mla_ceph_build_directory }}/Dockerfile"
+            mode: '0644'
+          register: _mla_ceph_dockerfile
+
+        - name: Inspect any existing workaround image
+          ansible.builtin.command:
+            argv: [docker, image, inspect, "{{ cephadm_image }}"]
+          register: _mla_ceph_image
+          changed_when: false
+          failed_when:
+            - _mla_ceph_image.rc != 0
+            - "'No such image' not in _mla_ceph_image.stderr"
+
+        - name: Build the image from its pinned base
+          ansible.builtin.command:
+            argv:
+              - docker
+              - build
+              - --pull=false
+              - --tag
+              - "{{ cephadm_image }}"
+              - "{{ mla_ceph_build_directory }}"
+          when: _mla_ceph_image.rc != 0 or _mla_ceph_dockerfile.changed
+          changed_when: true
+
+        - name: Inspect the resulting image
+          ansible.builtin.command:
+            argv: [docker, image, inspect, "{{ cephadm_image }}"]
+          register: _mla_ceph_verified_image
+          changed_when: false
+
+        - name: Verify image provenance and persistent environment
+          ansible.builtin.assert:
+            that:
+              - _image.Architecture == 'arm64'
+              - _image.Config.Labels['org.mla.ceph.base'] == mla_ceph_base_image
+              - _image.Config.Labels['org.mla.ceph.stacktrace'] == mla_ceph_stacktrace_method
+              - "('TCMALLOC_STACKTRACE_METHOD=' + mla_ceph_stacktrace_method) in _image.Config.Env"
+          vars:
+            _image: "{{ (_mla_ceph_verified_image.stdout | from_json)[0] }}"
+
+        - name: Verify ceph-osd starts with the image defaults
+          ansible.builtin.command:
+            argv:
+              - docker
+              - run
+              - --rm
+              - --network=none
+              - --entrypoint=ceph-osd
+              - "{{ cephadm_image }}"
+              - --version
+          register: _mla_ceph_osd_version
+          changed_when: false
+          failed_when: >-
+            _mla_ceph_osd_version.rc != 0 or
+            ('ceph version ' + ceph_version + ' ') not in _mla_ceph_osd_version.stdout
+
+- name: Select the workaround image for bootstrap and orchestration
+  hosts: controllers[0]
+  become: true
+  environment:
+    CEPHADM_IMAGE: "{{ cephadm_image }}"
+    CEPH_CONTAINER_BINARY: docker
+  tasks:
+    - name: Detect an existing cluster on every controller
+      ansible.builtin.stat:
+        path: "/var/lib/ceph/{{ ceph_fsid }}/mon.{{ hostvars[item].inventory_hostname_short }}/store.db"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['controllers'] }}"
+      register: _mla_ceph_mon_stores
+
+    - name: Select the bootstrap or existing admin host
+      ansible.builtin.set_fact:
+        _mla_ceph_admin: >-
+          {{ (_mla_ceph_mon_stores.results | selectattr('stat.exists') |
+              map(attribute='item') | first) | default(groups['controllers'][0]) }}
+        _mla_ceph_existing: >-
+          {{ _mla_ceph_mon_stores.results | selectattr('stat.exists') | list | length > 0 }}
+
+    # Upstream bootstrap always pulls; a preloaded local image needs --skip-pull.
+    # After this step, the upstream role detects the MON and skips its bootstrap.
+    - name: Bootstrap a new cluster with the preloaded image
+      when: not _mla_ceph_existing
+      block:
+        - name: Create temporary bootstrap configuration
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .ceph.conf
+          register: _mla_ceph_bootstrap_conf
+
+        - name: Write bootstrap settings
+          community.general.ini_file:
+            path: "{{ _mla_ceph_bootstrap_conf.path }}"
+            section: "{{ item.section }}"
+            option: "{{ item.option }}"
+            value: "{{ item.value }}"
+            mode: '0600'
+          loop: >-
+            {{ ceph_conf_overrides +
+               [{'section': 'mgr', 'option': 'mgr/cephadm/use_repo_digest', 'value': 'false'}] }}
+
+        - name: Bootstrap Ceph without pulling the local image from a registry
+          ansible.builtin.command:
+            argv:
+              - cephadm
+              - --image
+              - "{{ cephadm_image }}"
+              - --docker
+              - bootstrap
+              - --skip-pull
+              - --fsid
+              - "{{ ceph_fsid }}"
+              - --mon-ip
+              - "{{ ansible_host }}"
+              - --cluster-network
+              - "{{ ceph_cluster_network | default(ceph_mon_public_network) }}"
+              - --ssh-user
+              - cephadm
+              - --config
+              - "{{ _mla_ceph_bootstrap_conf.path }}"
+              - --skip-monitoring-stack
+          changed_when: true
+      always:
+        - name: Remove temporary bootstrap configuration
+          ansible.builtin.file:
+            path: "{{ _mla_ceph_bootstrap_conf.path }}"
+            state: absent
+          when: _mla_ceph_bootstrap_conf.path is defined
+
+    - name: Configure the existing cluster without changing its Ceph release
+      delegate_to: "{{ _mla_ceph_admin }}"
+      vars:
+        # Disable digest conversion before selecting a locally built image.
+        _mla_ceph_image_settings:
+          - section: mgr
+            name: mgr/cephadm/use_repo_digest
+            value: 'false'
+          - section: global
+            name: container_image
+            value: "{{ cephadm_image }}"
+          - section: osd
+            name: container_image
+            value: "{{ cephadm_image }}"
+        _ceph_command:
+          - cephadm
+          - --image
+          - "{{ cephadm_image }}"
+          - --docker
+          - shell
+          - --fsid
+          - "{{ ceph_fsid }}"
+          - --
+          - ceph
+      block:
+        - name: Read versions of running Ceph daemons
+          ansible.builtin.command:
+            argv: "{{ _ceph_command + ['versions', '--format=json'] }}"
+          register: _mla_ceph_versions
+          changed_when: false
+
+        - name: Refuse an implicit upgrade or downgrade
+          ansible.builtin.assert:
+            that:
+              - >-
+                (_mla_ceph_versions.stdout | from_json)['overall'].keys() |
+                reject('match', '^ceph version ' + (ceph_version | regex_escape) + ' ') |
+                list | length == 0
+            fail_msg: Running Ceph versions differ from the pinned image; review migration first.
+
+        - name: Read current image selection settings
+          ansible.builtin.command:
+            argv: "{{ _ceph_command + ['config', 'dump', '--format=json'] }}"
+          register: _mla_ceph_config
+          changed_when: false
+
+        - name: Find image settings that need changing
+          ansible.builtin.set_fact:
+            _mla_ceph_image_changes: []
+
+        - name: Collect changed image settings in safe order
+          ansible.builtin.set_fact:
+            _mla_ceph_image_changes: "{{ _mla_ceph_image_changes + [item] }}"
+          loop: "{{ _mla_ceph_image_settings }}"
+          when: >-
+            (_mla_ceph_config.stdout | from_json |
+             selectattr('section', 'equalto', item.section) |
+             selectattr('name', 'equalto', item.name) |
+             selectattr('value', 'equalto', item.value) | list | length) == 0
+
+        - name: Read manager module state
+          ansible.builtin.command:
+            argv: "{{ _ceph_command + ['mgr', 'module', 'ls', '--format=json'] }}"
+          register: _mla_ceph_modules
+          changed_when: false
+
+        - name: Check that cephadm can actually handle commands
+          ansible.builtin.command:
+            argv: "{{ _ceph_command + ['cephadm', 'get-pub-key'] }}"
+          register: _mla_cephadm_probe
+          changed_when: false
+          failed_when: false
+
+        - name: Stop on an unrelated cephadm error
+          ansible.builtin.assert:
+            that:
+              - >-
+                _mla_cephadm_probe.rc == 0 or
+                'cephadm' not in (_mla_ceph_modules.stdout | from_json).enabled_modules or
+                ('ContainerInspectInfo' in _mla_cephadm_probe.stderr and
+                 'repo_digests' in _mla_cephadm_probe.stderr)
+            fail_msg: "Unexpected cephadm failure; inspect the manager before restarting it: {{ _mla_cephadm_probe.stderr }}"
+
+        # Quiesce orchestration so its background loop cannot inspect a local tag
+        # between config updates. Re-enabling reloads settings and also recovers
+        # the previously crashed module. MONs, MGR processes and OSDs stay running.
+        - name: Apply image settings with orchestration temporarily disabled
+          when: _mla_ceph_image_changes | length > 0 or _mla_cephadm_probe.rc != 0
+          block:
+            - name: Disable the cephadm manager module
+              ansible.builtin.command:
+                argv: "{{ _ceph_command + ['mgr', 'module', 'disable', 'cephadm'] }}"
+              when: "'cephadm' in (_mla_ceph_modules.stdout | from_json).enabled_modules"
+              changed_when: true
+
+            - name: Apply digest policy before changing images
+              ansible.builtin.command:
+                argv: "{{ _ceph_command + ['config', 'set', item.section, item.name, item.value] }}"
+              loop: "{{ _mla_ceph_image_changes }}"
+              changed_when: true
+
+            - name: Enable cephadm with the updated settings
+              ansible.builtin.command:
+                argv: "{{ _ceph_command + ['mgr', 'module', 'enable', 'cephadm'] }}"
+              changed_when: true
+
+        - name: Require a working cephadm module before continuing deployment
+          ansible.builtin.command:
+            argv: "{{ _ceph_command + ['cephadm', 'get-pub-key'] }}"
+          register: _mla_cephadm_ready
+          changed_when: false
+          retries: 30
+          delay: 2
+          until: _mla_cephadm_ready.rc == 0

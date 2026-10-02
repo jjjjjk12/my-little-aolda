@@ -1,3 +1,35 @@
+# Lab resource limits and explicit empty logging configuration.
+nova_helm_values:
+  pod:
+    lifecycle:
+      upgrades:
+        deployments:
+          rolling_update:
+            max_surge: 0
+            max_unavailable: 1
+    replicas:
+      api_metadata: 1
+      osapi: 1
+      conductor: 1
+      scheduler: 1
+      novncproxy: 1
+      spiceproxy: 1
+  conf:
+    nova_api_uwsgi:
+      uwsgi:
+        processes: 1
+    nova_metadata_uwsgi:
+      uwsgi:
+        processes: 1
+    nova:
+      DEFAULT:
+        osapi_compute_workers: 1
+        metadata_workers: 1
+        log_config_append: ''
+      conductor:
+        workers: 1
+      scheduler:
+        workers: 1
 nova_flavors:
 - disk: 1
   name: m1.tiny

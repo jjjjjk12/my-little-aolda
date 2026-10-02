@@ -1,0 +1,45 @@
+---
+# Entry point for this ARM64 lab. Keep the installed Galaxy collections intact.
+- name: Prepare VM Python dependencies
+  ansible.builtin.import_playbook: prepare-python.yml
+  tags: [always]
+
+- name: Prepare the ARM64 Ceph workaround
+  ansible.builtin.import_playbook: prepare-ceph-image.yml
+
+- name: Deploy Ceph with the correct cephadm image environment
+  ansible.builtin.import_playbook: ceph.yml
+
+# Same stage order as Atmosphere 7.8.1, with lab-specific component selection.
+- name: Install Kubernetes
+  ansible.builtin.import_playbook: kubernetes.yml
+
+- name: Install CSI
+  ansible.builtin.import_playbook: vexxhost.atmosphere.csi
+
+- name: Prepare Keystone OpenID image
+  ansible.builtin.import_playbook: prepare-keystone-image.yml
+
+- name: Prepare ARM64 storage helper images
+  ansible.builtin.import_playbook: prepare-arm64-cli-images.yml
+
+- name: Release duplicated Docker helper images
+  ansible.builtin.import_playbook: cleanup-image-build-cache.yml
+
+- name: Deploy infrastructure
+  ansible.builtin.import_playbook: infrastructure.yml
+
+- name: Deploy monitoring
+  ansible.builtin.import_playbook: monitoring.yml
+  tags: [monitoring]
+
+- name: Deploy OpenStack
+  ansible.builtin.import_playbook: openstack.yml
+
+- name: Prepare the complete ARM64 Skyline image
+  ansible.builtin.import_playbook: prepare-skyline-image.yml
+  tags: [skyline]
+
+- name: Deploy Skyline after the OpenStack APIs are ready
+  ansible.builtin.import_playbook: skyline.yml
+  tags: [skyline]

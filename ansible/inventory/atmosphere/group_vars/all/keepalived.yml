@@ -1,2 +1,8 @@
 keepalived_interface: lima0
 keepalived_vip: 192.168.110.121
+
+# The management interface already exists and is configured before Atmosphere.
+# Waiting for Neutron here blocks the VIP required by earlier deployment stages.
+keepalived_pod_dependency:
+  openvswitch: []
+  ovn: []

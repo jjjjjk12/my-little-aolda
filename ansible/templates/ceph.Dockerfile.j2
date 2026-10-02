@@ -1,0 +1,6 @@
+FROM {{ mla_ceph_base_image }}
+# ARM64 libunwind crashes during tcmalloc initialization, even with --version.
+# Image ENV also reaches ceph-volume's child ceph-osd process and daemon restarts.
+ENV TCMALLOC_STACKTRACE_METHOD={{ mla_ceph_stacktrace_method }}
+LABEL org.mla.ceph.base="{{ mla_ceph_base_image }}"
+LABEL org.mla.ceph.stacktrace="{{ mla_ceph_stacktrace_method }}"

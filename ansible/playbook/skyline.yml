@@ -1,0 +1,136 @@
+---
+# Lab integration of the upstream combined Skyline API/console container.
+# https://docs.openstack.org/skyline-apiserver/2025.2/install/docker-install-ubuntu.html
+- name: Deploy the Skyline dashboard
+  hosts: controllers[0]
+  become: true
+  pre_tasks:
+    - name: Wait for required API deployments before dashboard setup
+      kubernetes.core.k8s_info:
+        kubeconfig: /etc/kubernetes/admin.conf
+        api_version: apps/v1
+        kind: Deployment
+        namespace: openstack
+        name: "{{ item }}"
+        wait: true
+        wait_timeout: 600
+        wait_condition: {type: Available, status: 'True'}
+      loop: [keystone-api, glance-api, nova-api-osapi, neutron-server]
+    - name: Wait for the database cluster before creating Skyline credentials
+      kubernetes.core.k8s_info:
+        kubeconfig: /etc/kubernetes/admin.conf
+        api_version: pxc.percona.com/v1
+        kind: PerconaXtraDBCluster
+        namespace: openstack
+        name: percona-xtradb
+      register: _skyline_pxc
+      until: (_skyline_pxc.resources[0].status.state | default('')) == 'ready'
+      retries: 60
+      delay: 10
+  roles:
+    - role: vexxhost.atmosphere.defaults
+  tasks:
+    - name: Wait for Identity HTTPS discovery through the service VIP
+      ansible.builtin.uri:
+        url: "https://{{ openstack_helm_endpoints_keystone_api_host }}"
+        ca_path: /usr/local/share/ca-certificates/atmosphere.crt
+        status_code: [200, 300]
+      register: _skyline_identity_ready
+      retries: 30
+      delay: 10
+      until: _skyline_identity_ready is succeeded
+    - name: Verify the required OpenStack APIs are registered
+      openstack.cloud.catalog_service_info:
+        cloud: atmosphere
+      register: _skyline_catalog
+      retries: 30
+      delay: 10
+      until: _skyline_catalog is succeeded
+
+    - name: Require the core OpenStack services before adding the dashboard
+      ansible.builtin.assert:
+        that:
+          - "['identity', 'image', 'compute', 'network'] | difference(_skyline_catalog.services | map(attribute='type') | list) | length == 0"
+        fail_msg: Deploy the core OpenStack services before Skyline.
+
+    - name: Generate persistent Skyline credentials on the Ansible control machine
+      ansible.builtin.set_fact:
+        _skyline_password: "{{ lookup('ansible.builtin.password', playbook_dir + '/../../.ansible/secrets/skyline-service-password', length=64, chars=['ascii_letters', 'digits']) }}"
+        _skyline_secret_key: "{{ lookup('ansible.builtin.password', playbook_dir + '/../../.ansible/secrets/skyline-secret-key', length=64, chars=['ascii_letters', 'digits']) }}"
+      no_log: true
+
+    - name: Ensure the Skyline service project exists
+      openstack.cloud.project:
+        cloud: atmosphere
+        name: "{{ mla_skyline_service_project }}"
+        domain: "{{ mla_skyline_domain }}"
+        state: present
+
+    - name: Create the dedicated Skyline service user
+      openstack.cloud.identity_user:
+        cloud: atmosphere
+        name: "{{ mla_skyline_service_user }}"
+        domain: "{{ mla_skyline_domain }}"
+        password: "{{ _skyline_password }}"
+        update_password: on_create
+        state: present
+      register: _skyline_user_result
+      retries: 6
+      delay: 10
+      until: _skyline_user_result is succeeded
+      no_log: true
+
+    - name: Assign Skyline the upstream documented service-project role
+      openstack.cloud.role_assignment:
+        cloud: atmosphere
+        user: "{{ mla_skyline_service_user }}"
+        user_domain: "{{ mla_skyline_domain }}"
+        project: "{{ mla_skyline_service_project }}"
+        project_domain: "{{ mla_skyline_domain }}"
+        role: admin
+        state: present
+
+    - name: Read the Atmosphere CA certificate for verified API connections
+      ansible.builtin.slurp:
+        src: /usr/local/share/ca-certificates/atmosphere.crt
+      register: _skyline_ca
+
+    - name: Render Skyline configuration
+      ansible.builtin.set_fact:
+        _skyline_config: "{{ lookup('ansible.builtin.template', '../templates/skyline.yaml.j2') }}"
+      no_log: true
+
+    - name: Install Skyline configuration as a Kubernetes Secret
+      kubernetes.core.k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: skyline-config
+            namespace: "{{ mla_skyline_namespace }}"
+          type: Opaque
+          # Use data rather than stringData for stable comparisons on rerun.
+          data:
+            skyline.yaml: "{{ _skyline_config | b64encode }}"
+            ca.crt: "{{ _skyline_ca.content }}"
+      no_log: true
+
+    - name: Deploy Skyline storage, application and HTTPS ingress
+      kubernetes.core.k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        state: present
+        definition: "{{ lookup('ansible.builtin.template', '../templates/skyline-kubernetes.yml.j2') | from_yaml_all | list }}"
+        wait: true
+        wait_timeout: 600
+
+    - name: Verify the dashboard HTTPS endpoint
+      ansible.builtin.uri:
+        url: "https://{{ mla_skyline_host }}/"
+        ca_path: /usr/local/share/ca-certificates/atmosphere.crt
+        status_code: 200
+      register: _skyline_endpoint
+      retries: 30
+      delay: 10
+      until: _skyline_endpoint is succeeded

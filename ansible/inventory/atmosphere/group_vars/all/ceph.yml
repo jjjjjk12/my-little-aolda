@@ -1,8 +1,15 @@
 ceph_fsid: 3945a105-c03b-5372-a447-7524d67732da
 ceph_mon_public_network: 192.168.110.0/24
-ceph_version: "18.2.7"
-cephadm_image: >-
-  quay.io/ceph/ceph:v18.2.7@sha256:1b9158ce28975f95def6a0ad459fa19f1336506074267a4b47c1bd914a00fec0
+# Match the already bootstrapped cluster; do not downgrade it to 18.2.7.
+ceph_version: "18.2.8"
+# Retain the installed Reef cephadm tool independently of the daemon image.
+cephadm_version: "18.2.7"
+mla_ceph_base_image: >-
+  quay.io/ceph/ceph@sha256:69cbef90eb58cf96e572e7497227a2bcb0ec9175bc2247809c0a37857db9b820
+mla_ceph_stacktrace_method: generic_fp
+# Local image, prepared on EVERY Ceph host before orchestration. No registry push.
+cephadm_image: "mla/ceph:18.2.8-arm64-generic-fp-v1"
+mla_ceph_build_directory: /var/lib/mla/ceph-image
 
 # Memory target for each OSD sharing a lab node with Kubernetes.
 ceph_conf_overrides:

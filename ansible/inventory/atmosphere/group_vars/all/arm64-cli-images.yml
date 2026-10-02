@@ -1,0 +1,14 @@
+---
+mla_arm64_cli_images:
+  - name: glance
+    base: ghcr.io/vexxhost/glance@sha256:eaa3cac0c114181f0900f8f040d9c887a65be773658e20fb18ccc0c2a48d2072
+    image: docker.io/mla/glance:2025.2-arm64-kubectl-v1
+  - name: cinder
+    base: ghcr.io/vexxhost/cinder@sha256:d970d787b54c2517b40e5b917724f84f7009973cd36d03af45d5871329d6f376
+    image: docker.io/mla/cinder:2025.2-arm64-kubectl-v1
+  - name: ceph-helper
+    base: ghcr.io/vexxhost/libvirtd@sha256:c1384432d9e0f4f62058c4e9e766ef7d9d365f4590bcf90eab892f81b7b0ddd8
+    image: docker.io/mla/ceph-helper:2025.2-arm64-kubectl-v1
+  - name: heat
+    base: ghcr.io/vexxhost/heat@sha256:d491fc2dc48505b136ba9e86073a6a6c14541c2f0a08a9faeeec1e8cdefb2765
+    image: docker.io/mla/heat:2025.2-arm64-kubectl-v1

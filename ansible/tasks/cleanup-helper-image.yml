@@ -1,0 +1,33 @@
+---
+- name: Check Kubernetes image reference
+  ansible.builtin.command: ctr --namespace k8s.io images list --quiet
+  changed_when: false
+  register: mla_cleanup_runtime
+- name: Restore a helper removed by kubelet image garbage collection
+  when: mla_helper.image not in mla_cleanup_runtime.stdout_lines
+  block:
+    - name: Export retained Docker copy
+      ansible.builtin.command:
+        argv: [docker, save, --output, "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/image.tar", "{{ mla_helper.image }}"]
+      changed_when: true
+    - name: Import helper back into Kubernetes
+      ansible.builtin.command:
+        argv: [ctr, --namespace, k8s.io, images, import, --platform, linux/arm64, "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/image.tar"]
+      changed_when: true
+  always:
+    - name: Remove temporary archive
+      ansible.builtin.file:
+        path: "/var/lib/mla/arm64-cli/{{ mla_helper.name }}/image.tar"
+        state: absent
+- name: Verify helper is available to Kubernetes before cleanup
+  ansible.builtin.command:
+    argv: [crictl, inspecti, "{{ mla_helper.image }}"]
+  changed_when: false
+  no_log: true
+- name: Remove only this helper's Docker copy and base reference
+  ansible.builtin.command:
+    argv: [docker, image, rm, "{{ item }}"]
+  loop: ["{{ mla_helper.image }}", "{{ mla_helper.base }}"]
+  register: mla_remove_build_image
+  changed_when: mla_remove_build_image.rc == 0
+  failed_when: mla_remove_build_image.rc != 0 and 'No such image' not in mla_remove_build_image.stderr

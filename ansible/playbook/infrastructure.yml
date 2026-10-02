@@ -1,0 +1,52 @@
+---
+# Derived from Atmosphere 7.8.1 infrastructure.yml.
+# Copyright (c) VEXXHOST, Inc. Licensed under Apache-2.0.
+# https://www.apache.org/licenses/LICENSE-2.0
+- name: Deploy infrastructure operators and ingress
+  hosts: controllers
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: vexxhost.atmosphere.cert_manager
+      tags: [cert-manager]
+    - role: vexxhost.atmosphere.cluster_issuer
+      tags: [cluster-issuer]
+    - role: vexxhost.atmosphere.ingress_nginx
+      tags: [ingress-nginx]
+    - role: vexxhost.atmosphere.rabbitmq_cluster_operator
+      tags: [rabbitmq-cluster-operator]
+    - role: vexxhost.atmosphere.percona_xtradb_cluster_operator
+      tags: [percona-xtradb-cluster-operator]
+
+- name: Deploy infrastructure services
+  hosts: controllers
+  become: true
+  any_errors_fatal: true
+  pre_tasks:
+    # Upstream reads status.pxc.version unconditionally for an existing CR.
+    # On a fresh installation no CR exists, so the upstream role creates it.
+    - name: Wait for an existing Percona cluster to publish its version and state
+      kubernetes.core.k8s_info:
+        kubeconfig: /etc/kubernetes/admin.conf
+        api_version: pxc.percona.com/v1
+        kind: PerconaXtraDBCluster
+        name: percona-xtradb
+        namespace: openstack
+      register: mla_pxc_preflight
+      run_once: true
+      until: >-
+        (mla_pxc_preflight.resources | length == 0) or
+        ((mla_pxc_preflight.resources[0].get('status', {}).get('pxc', {}).get('version', '') | length > 0) and
+         (mla_pxc_preflight.resources[0].get('status', {}).get('state', '') | length > 0))
+      retries: 90
+      delay: 10
+      tags: [percona-xtradb-cluster]
+  roles:
+    - role: vexxhost.atmosphere.percona_xtradb_cluster
+      tags: [percona-xtradb-cluster]
+    - role: vexxhost.atmosphere.valkey
+      tags: [valkey]
+    - role: vexxhost.atmosphere.keycloak
+      tags: [keycloak]
+    - role: vexxhost.atmosphere.keepalived
+      tags: [keepalived]

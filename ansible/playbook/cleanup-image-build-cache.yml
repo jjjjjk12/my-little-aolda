@@ -1,0 +1,12 @@
+---
+- name: Release duplicate helper image storage after runtime import
+  hosts: controllers
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Preserve runtime images and release Docker duplicates
+      ansible.builtin.include_tasks: ../tasks/cleanup-helper-image.yml
+      loop: "{{ mla_arm64_cli_images }}"
+      loop_control:
+        loop_var: mla_helper
+        label: "{{ mla_helper.name }}"

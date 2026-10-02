@@ -1,0 +1,15 @@
+---
+# Derived from Atmosphere 7.8.1 playbooks; upstream roles remain unchanged.
+# Copyright (c) VEXXHOST, Inc. Licensed under Apache-2.0.
+# https://www.apache.org/licenses/LICENSE-2.0
+# Lab selection: core OpenStack + Skyline; reduced monitoring.
+- name: Deploy Monitoring
+  hosts: controllers[0]
+  become: true
+  roles:
+  - role: vexxhost.atmosphere.node_feature_discovery
+    tags:
+    - node-feature-discovery
+  - role: vexxhost.atmosphere.kube_prometheus_stack
+    tags:
+    - kube-prometheus-stack

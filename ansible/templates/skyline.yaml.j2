@@ -1,0 +1,26 @@
+default:
+  debug: false
+  secret_key: {{ _skyline_secret_key | to_json }}
+  database_url: sqlite:////var/lib/skyline/skyline.db
+  cafile: /etc/skyline/mla-ca.crt
+  log_dir: /var/log/skyline
+  ssl_enabled: true
+  prometheus_endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+openstack:
+  keystone_url: https://{{ openstack_helm_endpoints_keystone_api_host }}/v3/
+  default_region: {{ openstack_helm_endpoints_region_name | to_json }}
+  interface_type: public
+  system_project: {{ mla_skyline_service_project | to_json }}
+  system_project_domain: {{ mla_skyline_domain | to_json }}
+  system_user_domain: {{ mla_skyline_domain | to_json }}
+  system_user_name: {{ mla_skyline_service_user | to_json }}
+  system_user_password: {{ _skyline_password | to_json }}
+  sso_enabled: false
+  service_mapping:
+    identity: keystone
+    image: glance
+    compute: nova
+    placement: placement
+    network: neutron
+    block-storage: cinder
+    volumev3: cinder

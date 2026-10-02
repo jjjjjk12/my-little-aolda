@@ -1,6 +1,16 @@
 ---
 # ARM64 전용 HAProxy 이미지
 atmosphere_image_overrides:
+  # v1.1.0 adds ARM64 support; keep the verified manifest pinned.
+  libvirt_tls_sidecar: ghcr.io/vexxhost/libvirt-tls-sidecar:v1.1.0@sha256:ed068bda78f5583e8520c2e7756866b6631a2b00de5339ef883653e999e2aebf
+  cinder_backup_storage_init: docker.io/mla/cinder:2025.2-arm64-kubectl-v1
+  nova_storage_init: docker.io/mla/heat:2025.2-arm64-kubectl-v1
+  glance_storage_init: docker.io/mla/glance:2025.2-arm64-kubectl-v1
+  cinder_storage_init: docker.io/mla/cinder:2025.2-arm64-kubectl-v1
+  ceph_config_helper: docker.io/mla/ceph-helper:2025.2-arm64-kubectl-v1
+  keystone_api: "{{ mla_keystone_image }}"
+  # v1.0.0 lacks ARM64; v1.0.2 publishes an ARM64 manifest.
+  pod_tls_sidecar: ghcr.io/vexxhost/pod-tls-sidecar:v1.0.2@sha256:5b97a9eeee01ac5861da79455947f696ba3439fd236373dac72a4107bd9a6fd5
   percona_xtradb_cluster_haproxy: >-
     docker.io/percona/haproxy:2.8.15-arm64@sha256:bbc5b3b66ac985d1a4500195539e7dff5196245a5a842a6858ea0848ec089967
 
@@ -20,7 +30,7 @@ percona_xtradb_cluster_spec:
           requests:
             storage: 5Gi
 
-# 로그 저장: 3GiB, 보관 기간 24시간
+# 현재 Loki는 배포 대상에서 제외. 나중에 추가할 때 사용할 크기 설정.
 loki_helm_values:
   loki:
     limits_config:
@@ -42,6 +52,25 @@ loki_helm_values:
 
 # 메트릭 및 알림 저장 공간 축소
 kube_prometheus_stack_helm_values:
+  grafana:
+    # Loki is excluded from the lab; do not provision a broken datasource.
+    additionalDataSources:
+      - name: AlertManager
+        type: alertmanager
+        uid: alertmanager
+        url: http://kube-prometheus-stack-alertmanager.monitoring.svc:9093
+        access: proxy
+        editable: false
+        jsonData:
+          implementation: prometheus
+          handleGrafanaManagedAlerts: true
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        url: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+        access: proxy
+        isDefault: true
+        editable: false
   prometheus:
     prometheusSpec:
       replicas: 1
@@ -87,3 +116,8 @@ rabbitmq_spec:
       memory: 512Mi
     limits:
       memory: 1Gi
+
+# Use ingress-nginx's built-in 404 handler; the separate default backend is amd64-only.
+ingress_nginx_helm_values:
+  defaultBackend:
+    enabled: false

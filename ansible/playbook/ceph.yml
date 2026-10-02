@@ -1,0 +1,58 @@
+---
+# Mirrors Atmosphere 7.8.1 / vexxhost.ceph 4.2.0 play ordering, reusing their roles.
+# import_playbook.environment is overridden by upstream play.environment;
+# set CEPHADM_IMAGE directly on the plays that invoke cephadm instead.
+- name: Load Atmosphere image defaults for Ceph dependencies
+  hosts: all
+  become: true
+  roles:
+    - role: vexxhost.atmosphere.defaults
+  tasks:
+    - name: Retain resolved Atmosphere images for following plays
+      ansible.builtin.set_fact:
+        atmosphere_images: "{{ atmosphere_images }}"
+
+- name: Deploy Ceph monitors & managers
+  hosts: "{{ ceph_control_plane_group | default('controllers') }}"
+  become: true
+  vars:
+    containerd_pause_image: "{{ atmosphere_images['pause'] }}"
+  environment: &ceph_environment
+    CEPHADM_IMAGE: "{{ cephadm_image }}"
+    CEPH_CONTAINER_IMAGE: "{{ cephadm_image }}"
+    CEPH_CONTAINER_BINARY: docker
+  roles:
+    - role: vexxhost.ceph.mon
+      tags: [ceph-mon]
+    - role: vexxhost.ceph.mgr
+      tags: [ceph-mgr]
+
+- name: Deploy Ceph OSDs
+  hosts: "{{ ceph_osd_group | default('cephs') }}"
+  become: true
+  vars:
+    containerd_pause_image: "{{ atmosphere_images['pause'] }}"
+  environment: *ceph_environment
+  roles:
+    - role: vexxhost.ceph.osd
+      tags: [ceph-osd]
+
+- name: Deploy Ceph exporters
+  hosts: "{{ ceph_control_plane_group | default('controllers') }}"
+  become: true
+  vars:
+    containerd_pause_image: "{{ atmosphere_images['pause'] }}"
+  environment: *ceph_environment
+  roles:
+    - role: vexxhost.ceph.ceph_exporter
+      tags: [ceph-exporter]
+
+- name: Prepare the kernel RBD client
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Ensure RBD kernel module is loaded
+      community.general.modprobe:
+        name: rbd
+        persistent: present

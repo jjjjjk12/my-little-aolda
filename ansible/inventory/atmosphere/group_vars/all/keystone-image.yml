@@ -1,0 +1,5 @@
+---
+mla_keystone_base_image: ghcr.io/vexxhost/keystone@sha256:fcd464925ae7f34e73415d9177a7ea7aa63b1db3fed7869d2ed9cb1a6d17f615
+mla_keystone_image: docker.io/mla/keystone:2025.2-oidc-v1
+mla_keystone_oidc_package_version: 2.4.15.1-1ubuntu0.1
+mla_keystone_build_directory: /var/lib/mla/keystone-image

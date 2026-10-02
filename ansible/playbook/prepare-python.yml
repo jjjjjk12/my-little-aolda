@@ -1,0 +1,42 @@
+---
+- name: Prepare the VM Python environment for Atmosphere
+  hosts: all
+  become: true
+  any_errors_fatal: true
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Install distribution Python prerequisites
+      ansible.builtin.apt:
+        name:
+          - python3-venv
+          - python3-packaging
+          - python3-pymysql
+          - python3-openstacksdk
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      register: mla_python_packages
+      until: mla_python_packages is succeeded
+      retries: 3
+      delay: 5
+
+    # Inherit distribution modules such as python3-kubernetes, installed upstream.
+    # pip writes only into this venv, without disabling PEP 668 system protection.
+    - name: Create a virtual environment with access to distribution modules
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -m
+          - venv
+          - --system-site-packages
+          - "{{ mla_python_venv }}"
+        creates: "{{ mla_python_venv }}/bin/python3"
+
+    - name: Verify Python dependencies and environment isolation
+      ansible.builtin.command:
+        argv:
+          - "{{ mla_python_venv }}/bin/python3"
+          - -c
+          - "import sys, pip, pymysql, openstack, packaging; assert sys.prefix != sys.base_prefix; print(sys.executable)"
+      changed_when: false

@@ -1,3 +1,4 @@
+# Small lab: central services use one replica; node agents, DB and Ceph retain three nodes.
 neutron_networks:
 - external: true
   mtu_size: 1500
@@ -14,7 +15,28 @@ neutron_networks:
     gateway_ip: 192.168.120.1
     name: public-subnet
 neutron_helm_values:
+  pod:
+    lifecycle:
+      upgrades:
+        deployments:
+          rolling_update:
+            max_surge: 0
+            max_unavailable: 1
+    replicas:
+      server: 1
+      rpc_server: 1
   conf:
+    neutron_api_uwsgi:
+      uwsgi:
+        processes: 1
+    neutron_policy_server_uwsgi:
+      uwsgi:
+        processes: 1
+    neutron:
+      DEFAULT:
+        log_config_append: ''
+        api_workers: 1
+        rpc_workers: 1
     auto_bridge_add:
       br-ex: lima1
     plugins:

@@ -1,0 +1,19 @@
+---
+- name: Prepare ARM64 kubectl in storage helper images
+  hosts: controllers
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Verify the installed Kubernetes CLI
+      ansible.builtin.command: /usr/bin/kubectl version --client=true --output=json
+      changed_when: false
+      register: mla_kubectl_version
+    - name: Require ARM64 Kubernetes CLI
+      ansible.builtin.assert:
+        that: (mla_kubectl_version.stdout | from_json).clientVersion.platform == 'linux/arm64'
+    - name: Build and import each helper
+      ansible.builtin.include_tasks: ../tasks/prepare-arm64-cli-image.yml
+      loop: "{{ mla_arm64_cli_images }}"
+      loop_control:
+        loop_var: mla_helper
+        label: "{{ mla_helper.name }}"

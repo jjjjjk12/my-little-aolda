@@ -1,0 +1,175 @@
+---
+# Retains clearly named lab resources for inspection; no automatic deletion.
+- name: Verify OpenStack with a small ARM64 guest
+  hosts: controllers[0]
+  become: true
+  vars_files:
+    - probe-vars.yml
+  vars:
+    mla_smoke_prefix: mla-smoke
+    mla_smoke_cidr: 192.168.200.0/24
+  pre_tasks:
+    - name: Wait for core API deployments before testing
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: openstack
+        name: "{{ item }}"
+        wait: true
+        wait_timeout: 600
+        wait_condition: {type: Available, status: 'True'}
+      loop: [keystone-api, glance-api, nova-api-osapi, neutron-server, cinder-api]
+  tasks:
+    - name: Create the image download directory
+      ansible.builtin.file:
+        path: /var/lib/mla/smoke
+        state: directory
+        mode: '0755'
+    - name: Download checksum-pinned ARM64 CirrOS
+      ansible.builtin.get_url:
+        url: "{{ probe_image_url }}"
+        dest: /var/lib/mla/smoke/cirros-aarch64.img
+        checksum: "sha256:{{ probe_image_sha256 }}"
+        mode: '0644'
+        timeout: 120
+    - name: Register the ARM64 UEFI image
+      openstack.cloud.image:
+        cloud: atmosphere
+        name: "{{ mla_smoke_prefix }}-cirros-aarch64"
+        filename: /var/lib/mla/smoke/cirros-aarch64.img
+        disk_format: qcow2
+        container_format: bare
+        properties:
+          architecture: aarch64
+          hw_firmware_type: uefi
+          hw_machine_type: virt
+          hw_disk_bus: virtio
+          hw_vif_model: virtio
+        state: present
+        timeout: 300
+    - name: Create an isolated test network
+      openstack.cloud.network:
+        cloud: atmosphere
+        name: "{{ mla_smoke_prefix }}-net"
+        state: present
+    - name: Create its DHCP subnet
+      openstack.cloud.subnet:
+        cloud: atmosphere
+        name: "{{ mla_smoke_prefix }}-subnet"
+        network_name: "{{ mla_smoke_prefix }}-net"
+        cidr: "{{ mla_smoke_cidr }}"
+        enable_dhcp: true
+        dns_nameservers: [1.1.1.1]
+        state: present
+    - name: Connect the test subnet to the provider network
+      openstack.cloud.router:
+        cloud: atmosphere
+        name: "{{ mla_smoke_prefix }}-router"
+        network: public
+        interfaces: ["{{ mla_smoke_prefix }}-subnet"]
+        state: present
+    - name: Create a limited test security group
+      openstack.cloud.security_group:
+        cloud: atmosphere
+        name: "{{ mla_smoke_prefix }}-sg"
+        description: Local lab functional verification
+        state: present
+    - name: Allow ICMP from the local provider network
+      openstack.cloud.security_group_rule:
+        cloud: atmosphere
+        security_group: "{{ mla_smoke_prefix }}-sg"
+        protocol: icmp
+        remote_ip_prefix: 192.168.120.0/24
+        direction: ingress
+        state: present
+    # openstack.cloud.server passes a tags argument unsupported by Ubuntu SDK 3.0.
+    # Use Atmosphere's version-pinned CLI without changing deployment dependencies.
+    - name: Write the guest verification user-data
+      ansible.builtin.copy:
+        dest: /var/lib/mla/smoke/user-data.sh
+        mode: '0644'
+        content: |
+          #!/bin/sh
+          echo MLA_SMOKE_BOOT_OK > /dev/console
+          uname -m > /dev/console
+    - name: Look for an existing test guest
+      ansible.builtin.command:
+        argv: [openstack, server, list, --name, "^{{ mla_smoke_prefix }}-vm$", -f, value, -c, ID]
+      register: mla_smoke_existing
+      changed_when: false
+    - name: Boot the ARM64 guest through Nova
+      ansible.builtin.command:
+        argv:
+          - openstack
+          - server
+          - create
+          - "{{ mla_smoke_prefix }}-vm"
+          - --image
+          - "{{ mla_smoke_prefix }}-cirros-aarch64"
+          - --flavor
+          - m1.tiny
+          - --network
+          - "{{ mla_smoke_prefix }}-net"
+          - --security-group
+          - "{{ mla_smoke_prefix }}-sg"
+          - --user-data
+          - /opt/user-data.sh
+          - --wait
+          - -f
+          - value
+          - -c
+          - id
+        chdir: /var/lib/mla/smoke
+      when: mla_smoke_existing.stdout | trim == ''
+      changed_when: true
+    - name: Require the guest to become ACTIVE
+      ansible.builtin.command:
+        argv: [openstack, server, show, "{{ mla_smoke_prefix }}-vm", -f, value, -c, status]
+      register: mla_smoke_status
+      changed_when: false
+      until: mla_smoke_status.stdout | trim == 'ACTIVE'
+      retries: 30
+      delay: 10
+    - name: Ensure a provider floating IP is attached to the guest port
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_python_interpreter }}"
+          - -c
+          - |
+            import json, sys, openstack
+            c = openstack.connect(cloud='atmosphere')
+            server = c.compute.find_server(sys.argv[1], ignore_missing=False)
+            network = c.network.find_network(sys.argv[2], ignore_missing=False)
+            ports = list(c.network.ports(device_id=server.id, network_id=network.id))
+            assert len(ports) == 1, 'Expected exactly one guest port'
+            ips = list(c.network.ips(port_id=ports[0].id))
+            changed = not ips
+            if changed:
+                external = c.network.find_network('public', ignore_missing=False)
+                ips = [c.network.create_ip(floating_network_id=external.id, port_id=ports[0].id)]
+            print(json.dumps({'changed': changed, 'address': ips[0].floating_ip_address}))
+          - "{{ mla_smoke_prefix }}-vm"
+          - "{{ mla_smoke_prefix }}-net"
+      register: mla_smoke_fip
+      changed_when: (mla_smoke_fip.stdout | from_json).changed
+    - name: Create a small Ceph-backed Cinder volume
+      openstack.cloud.volume:
+        cloud: atmosphere
+        name: "{{ mla_smoke_prefix }}-volume"
+        size: 1
+        volume_type: rbd1
+        state: present
+        wait: true
+        timeout: 300
+    - name: Verify guest metadata and user-data execution from its console
+      ansible.builtin.command:
+        argv: [openstack, console, log, show, "{{ mla_smoke_prefix }}-vm"]
+      register: mla_smoke_console
+      changed_when: false
+      no_log: true
+      until: "'MLA_SMOKE_BOOT_OK' in mla_smoke_console.stdout"
+      retries: 30
+      delay: 10
+    - name: Report the functional checks
+      ansible.builtin.debug:
+        msg: ARM64 guest ACTIVE, metadata user-data executed, floating IP allocated, Cinder volume available. Resources retained as mla-smoke-*.

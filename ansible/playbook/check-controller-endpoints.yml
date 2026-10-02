@@ -1,0 +1,10 @@
+---
+# Exercise controller-side URL lookup in the actual deployment process context.
+- name: Verify controller access to the existing Keycloak endpoint
+  hosts: controllers[0]
+  gather_facts: false
+  tasks:
+    - name: Verify OpenID discovery from the Ansible controller
+      ansible.builtin.assert:
+        that:
+          - "(lookup('ansible.builtin.url', 'https://' ~ keycloak_host ~ '/realms/master/.well-known/openid-configuration', validate_certs=cluster_issuer_type != 'self-signed') | from_json).issuer == 'https://' ~ keycloak_host ~ '/realms/master'"

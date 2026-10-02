@@ -1,0 +1,22 @@
+---
+# The upstream ARM64 image lacks skyline_console; add the matching release wheel.
+mla_skyline_base_image: >-
+  docker.io/99cloud/skyline:2025.2@sha256:28787ad4577d54467114fdd57450a2213513923b39fd054618eb8750d180e42b
+mla_skyline_image: docker.io/mla/skyline:2025.2-console-v1
+mla_skyline_build_directory: /var/lib/mla/images/skyline
+mla_skyline_console_wheel: skyline_console-7.0.0-py3-none-any.whl
+mla_skyline_console_url: https://files.pythonhosted.org/packages/4a/6e/e797b324c0f0f28b9ea81b6534016d9ffc43d0d38fb091c4b23f55ce105d/skyline_console-7.0.0-py3-none-any.whl
+mla_skyline_console_checksum: sha256:149e5f13ad170ddfeab1f4722fc0e5d09ef64550b8c0a82e379b492a841c291d
+mla_skyline_host: dashboard.mla.jinkang.dev
+mla_skyline_namespace: openstack
+mla_skyline_service_user: skyline
+mla_skyline_service_project: service
+mla_skyline_domain: Default
+# One replica with SQLite on a PVC: local lab only, not an HA database.
+mla_skyline_storage_size: 1Gi
+mla_skyline_resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi

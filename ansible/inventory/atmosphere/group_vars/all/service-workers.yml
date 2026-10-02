@@ -1,0 +1,63 @@
+# Lab resource limits and explicit empty logging configuration.
+glance_helm_values:
+  conf:
+    glance_api_uwsgi:
+      uwsgi:
+        processes: 1
+    glance:
+      DEFAULT:
+        workers: 1
+        log_config_append: ''
+  pod:
+    lifecycle:
+      upgrades:
+        deployments:
+          rolling_update:
+            max_surge: 0
+            max_unavailable: 1
+    replicas:
+      api: 1
+cinder_helm_values:
+  conf:
+    cinder_api_uwsgi:
+      uwsgi:
+        processes: 1
+    cinder:
+      DEFAULT:
+        osapi_volume_workers: 1
+        log_config_append: ''
+  pod:
+    lifecycle:
+      upgrades:
+        deployments:
+          rolling_update:
+            max_surge: 0
+            max_unavailable: 1
+    replicas:
+      api: 1
+      scheduler: 1
+placement_helm_values:
+  conf:
+    placement_api_uwsgi:
+      uwsgi:
+        processes: 1
+    placement:
+      DEFAULT:
+        log_config_append: ''
+  pod:
+    lifecycle:
+      upgrades:
+        deployments:
+          rolling_update:
+            max_surge: 0
+            max_unavailable: 1
+    replicas:
+      api: 1
+keystone_helm_values:
+  pod:
+    replicas:
+      api: 1
+  conf:
+    keystone:
+      DEFAULT:
+        log_config_append: ''
